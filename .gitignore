@@ -1,0 +1,15 @@
+/ME/ME
+/StartME/StartME
+/Cli/Cli
+/bin/ME
+/bin/ME-cli
+/bin/StartME
+/bin/Tcli
+/ThriftClient/ThriftClient
+/release
+*.debug
+.idea
+debug.log
+debug.log.old
+startME.log
+

@@ -1,0 +1,92 @@
+{
+	"CommandRPCIPPort": "localhost:7391",
+	"ManagerRPCIPPort": "localhost:1937",
+	"JsonRPCIPPort": "localhost:7392",
+	"RESTfulIPPort": "localhost:7933",
+	
+	"MySQL_IP_ME": "127.0.0.1",
+	"MySQL_PORT_ME": 3306,
+	"MySQL_User_ME": "root",
+	"MySQL_Pwd_ME": "root",
+	
+	"MySQL_IP_TE": "127.0.0.1",
+	"MySQL_PORT_TE": 3306,
+	"MySQL_User_TE": "root",
+	"MySQL_Pwd_TE": "root",
+
+	"InPoolMode": "block",
+	"CoinList": [
+		{
+			"Mark": "Invalid",
+			"ID": -1
+		},
+		{
+			"Mark": "BTC",
+			"ID": 29
+		},
+		{
+			"Mark": "UBT",
+			"ID": 30
+		},
+		{
+			"Mark": "BCX",
+			"ID": 32
+		},
+		{
+			"Mark": "LTC",
+			"ID": 33
+		},
+		{
+			"Mark": "BCH",
+			"ID": 34
+		},
+		{
+			"Mark": "BTG",
+			"ID": 35
+		},
+		{
+			"Mark": "ETH",
+			"ID": 36
+		}	
+	],
+	"Markets": [
+		{
+			"Sym": {
+				"BaseCoin": "UBT",
+				"QuoteCoin": "BTC"
+			},
+			"Market_MixHR": false,
+			"Market_Human": true,
+			"Market_Robot": true,
+			"RobotList": [
+				4,
+				5,
+				387,
+				388
+			],
+			"NoneFinanceList": [
+				387,
+				388
+			]
+		},
+		{
+			"Sym": {
+				"BaseCoin": "BCX",
+				"QuoteCoin": "BTC"
+			},
+			"Market_MixHR": true,
+			"Market_Human": false,
+			"Market_Robot": false,
+			"RobotList": [
+				4,
+				5,
+				387,
+				388
+			],
+			"NoneFinanceList": [
+				387,
+				388
+			]
+		}
+	]
+}
