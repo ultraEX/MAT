@@ -1,5 +1,4 @@
-// me
-package me
+package core
 
 import (
 	"container/list"
@@ -9,13 +8,17 @@ import (
 	"runtime"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
-	"../config"
-	"../db/use_mysql"
-	"../doctor"
-	. "../itf"
-	//"../db/use_redis"
+	"../../comm"
+	"../../config"
+	"../../db/use_mysql"
+	"../../doctor"
+	te "../../tickers"
+	"../chansIO"
+	chs "../chansIO"
+	rt "../runtime"
 )
 
 const (
@@ -24,8 +27,12 @@ const (
 	INCHANNEL_BUFF_SIZE     int = 168
 	INCHANNEL_POOL_SIZE     int = 3
 	OUTCHANNEL_BUFF_SIZE    int = 68
-	OUTCHANNEL_POOL_SIZE    int = 168
+	OUTCHANNEL_POOL_SIZE    int = 1
 	CANCELCHANNEL_BUFF_SIZE int = 16
+)
+
+const (
+	MODULE_NAME_SORTSLICE string = "[MatchCore-Sortslice]: "
 )
 
 type TradeControl int64
@@ -69,14 +76,14 @@ func (p ReturnStatus) String() string {
 }
 
 type InPutPool struct {
-	inChannel [INCHANNEL_POOL_SIZE]chan *Order
+	inChannel [INCHANNEL_POOL_SIZE]chan *comm.Order
 	cur       int
 }
 
 func newInPutPool() *InPutPool {
 	o := new(InPutPool)
 	for i := 0; i < INCHANNEL_POOL_SIZE; i++ {
-		o.inChannel[i] = make(chan *Order, INCHANNEL_BUFF_SIZE)
+		o.inChannel[i] = make(chan *comm.Order, INCHANNEL_BUFF_SIZE)
 	}
 	o.cur = 0
 	return o
@@ -97,17 +104,17 @@ func (t *InPutPool) ErrCheck(cur int) error {
 	return nil
 }
 
-func (t *InPutPool) In(order *Order) {
+func (t *InPutPool) In(order *comm.Order) {
 	NO := t.GetChannel()
 	t.inChannel[NO] <- order
-	DebugPrintf(MODULE_NAME, LOG_LEVEL_TRACK, "InPutPool In order to channel(%d).\n", NO)
+	comm.DebugPrintf(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_TRACK, "InPutPool In order to channel(%d).\n", NO)
 }
 
-func (t *InPutPool) Out(cur int) (order *Order, ok bool) {
+func (t *InPutPool) Out(cur int) (order *comm.Order, ok bool) {
 	err := t.ErrCheck(cur)
 	if err == nil {
 		order, ok = <-t.inChannel[cur]
-		DebugPrintf(MODULE_NAME, LOG_LEVEL_TRACK, "InPutPool Out order from  channel(%d).\n", cur)
+		comm.DebugPrintf(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_TRACK, "InPutPool Out order from  channel(%d).\n", cur)
 		return order, ok
 	} else {
 		panic(err)
@@ -131,424 +138,17 @@ func (t *InPutPool) Len() int {
 	return sum
 }
 
-type MatchTrade struct {
-	bidTrade *Trade
-	askTrade *Trade
-	bidCount int
-	askCount int
-}
-
-type OutPoolType int64
-
-const (
-	OUTPOOL_MATCHTRADE  OutPoolType = 1
-	OUTPOOL_CANCELORDER OutPoolType = 2
-)
-
-func (p OutPoolType) String() string {
-	switch p {
-	case OUTPOOL_MATCHTRADE:
-		return "OUTPOOL_MATCHTRADE"
-	case OUTPOOL_CANCELORDER:
-		return "OUTPOOL_CANCELORDER"
-	}
-	return "<UNSET>"
-}
-
-type CancelOrder struct {
-	order *Order
-	count int
-}
-
-type OutPoolElem struct {
-	type_       OutPoolType
-	trade       *MatchTrade
-	cancelOrder *CancelOrder
-}
-
-type InOutSequence struct {
-	inSeq  int
-	outSeq int
-}
-
-type fNewCursor func() int
-type ChannelAlloc struct {
-	cm   map[int64]InOutSequence
-	fn   fNewCursor
-	lock *DebugLock
-}
-
-func newChannelAlloc(f fNewCursor) *ChannelAlloc {
-	obj := new(ChannelAlloc)
-	obj.cm = make(map[int64]InOutSequence)
-	obj.fn = f
-	obj.lock = NewDebugLock("newChannelAlloc")
-	return obj
-}
-
-func (t *ChannelAlloc) GetInSequenceNO(bid *Trade, ask *Trade) (bidSqe int, askSeq int) {
-	t.lock.Lock("GetInSequenceNO")
-	defer t.lock.Unlock("GetInSequenceNO")
-
-	vBidSeq, okBid := t.cm[bid.ID]
-	vAskSeq, okAsk := t.cm[ask.ID]
-	if !okBid {
-		ioSeq := InOutSequence{-1, -1}
-		t.cm[bid.ID] = ioSeq
-		vBidSeq = t.cm[bid.ID]
-		DebugPrintf(MODULE_NAME, LOG_LEVEL_DEBUG, "ChannelAlloc Debug: GetInSequenceNO to init (t.cm[bid.id=%d])=(%d,%d), CM.size=%d\n", bid.ID, vBidSeq.inSeq, vBidSeq.outSeq, len(t.cm))
-	}
-	if !okAsk {
-		ioSeq := InOutSequence{-1, -1}
-		t.cm[ask.ID] = ioSeq
-		vAskSeq = t.cm[ask.ID]
-		DebugPrintf(MODULE_NAME, LOG_LEVEL_DEBUG, "ChannelAlloc Debug: GetInSequenceNO to init (t.cm[ask.id=%d])=(%d,%d), CM.size=%d\n", ask.ID, vAskSeq.inSeq, vAskSeq.outSeq, len(t.cm))
-	}
-
-	vBidSeq.inSeq += 1
-	t.cm[bid.ID] = vBidSeq
-	vAskSeq.inSeq += 1
-	t.cm[ask.ID] = vAskSeq
-	DebugPrintf(MODULE_NAME, LOG_LEVEL_DEBUG, "ChannelAlloc Debug: GetInSequenceNO to update (t.cm[bid.id=%d])=(%d,%d), (t.cm[ask.id=%d])=(%d,%d), CM.size=%d\n",
-		bid.ID, vBidSeq.inSeq, vBidSeq.outSeq, ask.ID, vAskSeq.inSeq, vAskSeq.outSeq, len(t.cm))
-	return vBidSeq.inSeq, vAskSeq.inSeq
-}
-
-func (t *ChannelAlloc) GetInCancelSeqNO(order *Order) int {
-	t.lock.Lock("GetInCancelSeqNO")
-	defer t.lock.Unlock("GetInCancelSeqNO")
-
-	vOrderSeq, ok := t.cm[order.ID]
-	if !ok {
-		ioSeq := InOutSequence{-1, -1}
-		t.cm[order.ID] = ioSeq
-		vOrderSeq = t.cm[order.ID]
-		DebugPrintf(MODULE_NAME, LOG_LEVEL_DEBUG, "ChannelAlloc Debug: GetInCancelSeqNO to init (t.cm[order.id=%d])=(%d,%d), CM.size=%d\n", order.ID, vOrderSeq.inSeq, vOrderSeq.outSeq, len(t.cm))
-	}
-
-	vOrderSeq.inSeq += 1
-	t.cm[order.ID] = vOrderSeq
-	DebugPrintf(MODULE_NAME, LOG_LEVEL_DEBUG, "ChannelAlloc Debug: GetInCancelSeqNO to update (t.cm[order.id=%d])=(%d,%d), CM.size=%d\n", order.ID, vOrderSeq.inSeq, vOrderSeq.outSeq, len(t.cm))
-	return vOrderSeq.inSeq
-}
-
-func (t *ChannelAlloc) GetOutSequenceNO(bid *Trade, ask *Trade) (bidSqe int, askSeq int) {
-	t.lock.RLock("GetOutSequenceNO")
-	defer t.lock.RUnlock("GetOutSequenceNO")
-
-	vBidSeq, okBid := t.cm[bid.ID]
-	vAskSeq, okAsk := t.cm[ask.ID]
-
-	if !okBid || !okAsk {
-		fmt.Errorf("ChannelAlloc Debug: GetOutSequenceNO met none record trade(bid:%d, ask:%d) of sequence", bid.ID, ask.ID)
-	}
-
-	DebugPrintf(MODULE_NAME, LOG_LEVEL_DEBUG, "ChannelAlloc Debug: GetOutSequenceNO to get t.cm[bid.id=%d])=(%d,%d), (t.cm[ask.id=%d])=(%d,%d), CM.size=%d\n",
-		bid.ID, vBidSeq.inSeq, vBidSeq.outSeq, ask.ID, vAskSeq.inSeq, vAskSeq.outSeq, len(t.cm))
-	return vBidSeq.outSeq, vAskSeq.outSeq
-}
-
-func (t *ChannelAlloc) PopOutSequenceNO(bid *Trade, ask *Trade) (bidSqe int, askSeq int) {
-	t.lock.Lock("PopOutSequenceNO")
-	defer t.lock.Unlock("PopOutSequenceNO")
-
-	vBidSeq, okBid := t.cm[bid.ID]
-	vAskSeq, okAsk := t.cm[ask.ID]
-
-	if !okBid || !okAsk {
-		panic(fmt.Errorf("ChannelAlloc Debug: PopOutSequenceNO met none record trade(bid:%d, ask:%d) of sequence", bid.ID, ask.ID))
-	}
-
-	if bid.Status == ORDER_SUBMIT || bid.Status == ORDER_PARTIAL_FILLED {
-		ioSeq := vBidSeq
-		ioSeq.outSeq += 1
-		t.cm[bid.ID] = ioSeq
-
-		DebugPrintf(MODULE_NAME, LOG_LEVEL_DEBUG, "ChannelAlloc Debug: PopOutSequenceNO to update t.cm[bid.id=%d])=(%d,%d), CM.size=%d\n", bid.ID, ioSeq.inSeq, ioSeq.outSeq, len(t.cm))
-		if t.cm[bid.ID].outSeq > t.cm[bid.ID].inSeq {
-			panic(fmt.Errorf("ChannelAlloc Debug: PopOutSequenceNO bid order(id:%d) met outSeq > inSeq\n", bid.ID))
-		}
-	} else {
-		delete(t.cm, bid.ID)
-
-		DebugPrintf(MODULE_NAME, LOG_LEVEL_DEBUG, "ChannelAlloc Debug: PopOutSequenceNO to remove t.cm[bid.id=%d])=(%d,%d), CM.size=%d\n", bid.ID, vBidSeq.inSeq, vBidSeq.outSeq+1, len(t.cm))
-		if vBidSeq.outSeq+1 != vBidSeq.inSeq {
-			panic(fmt.Errorf("ChannelAlloc Debug: PopOutSequenceNO bid order(id:%d) rm cm met outSeq(%d)!=inSeq(%d)\n", bid.ID, vBidSeq.outSeq+1, vBidSeq.inSeq))
-		}
-	}
-	if ask.Status == ORDER_SUBMIT || ask.Status == ORDER_PARTIAL_FILLED {
-		ioSeq := vAskSeq
-		ioSeq.outSeq += 1
-		t.cm[ask.ID] = ioSeq
-
-		DebugPrintf(MODULE_NAME, LOG_LEVEL_DEBUG, "ChannelAlloc Debug: PopOutSequenceNO to update t.cm[bid.id=%d])=(%d,%d), CM.size=%d\n", ask.ID, ioSeq.inSeq, ioSeq.outSeq, len(t.cm))
-		if t.cm[ask.ID].outSeq > t.cm[ask.ID].inSeq {
-			panic(fmt.Errorf("ChannelAlloc Debug: PopOutSequenceNO ask order(id:%d) met outSeq > inSeq\n", ask.ID))
-		}
-	} else {
-		delete(t.cm, ask.ID)
-
-		DebugPrintf(MODULE_NAME, LOG_LEVEL_DEBUG, "ChannelAlloc Debug: PopOutSequenceNO to remove t.cm[bid.id=%d])=(%d,%d), CM.size=%d\n", ask.ID, vAskSeq.inSeq, vAskSeq.outSeq, len(t.cm))
-		if vAskSeq.outSeq+1 != vAskSeq.inSeq {
-			panic(fmt.Errorf("ChannelAlloc Debug: PopOutSequenceNO ask order(id:%d) rm cm met outSeq(%d)!=inSeq(%d)\n", ask.ID, vAskSeq.outSeq+1, vAskSeq.inSeq))
-		}
-	}
-
-	return vBidSeq.outSeq + 1, vAskSeq.outSeq + 1
-}
-
-func (t *ChannelAlloc) GetCancelSequenceNO(order *Order) int {
-	t.lock.RLock("GetCancelSequenceNO")
-	defer t.lock.RUnlock("GetCancelSequenceNO")
-
-	vOrderSeq, ok := t.cm[order.ID]
-	if !ok {
-		fmt.Errorf("ChannelAlloc Debug: GetCancelSequenceNO met none record Order(%d) of sequence", order.ID)
-	}
-
-	DebugPrintf(MODULE_NAME, LOG_LEVEL_DEBUG, "ChannelAlloc Debug: GetCancelSequenceNO to get t.cm[order.id=%d])=(%d,%d), CM.size=%d\n", order.ID, vOrderSeq.inSeq, vOrderSeq.outSeq, len(t.cm))
-	return vOrderSeq.outSeq
-}
-
-func (t *ChannelAlloc) PopCancelSequenceNO(order *Order) (seq int, res ReturnStatus) {
-	t.lock.Lock("PopCancelSequenceNO")
-	defer t.lock.Unlock("PopCancelSequenceNO")
-
-	vOrderSeq, ok := t.cm[order.ID]
-	if !ok {
-		panic(fmt.Errorf("ChannelAlloc Debug: PopCancelSequenceNO met none record order(%d) of sequence", order.ID))
-	}
-
-	if vOrderSeq.outSeq+1 < vOrderSeq.inSeq {
-		///panic(fmt.Errorf("ChannelAlloc Debug: PopCancelSequenceNO order(id:%d) rm cm met outSeq(%d)!=inSeq(%d)\n", order.ID, vOrderSeq.outSeq+1, vOrderSeq.inSeq))
-		fmt.Printf("ChannelAlloc Debug: PopCancelSequenceNO order(id:%d) rm cm met outSeq(%d)!=inSeq(%d)\n", order.ID, vOrderSeq.outSeq+1, vOrderSeq.inSeq)
-		ioSeq := vOrderSeq
-		ioSeq.outSeq += 1
-		t.cm[order.ID] = ioSeq
-		DebugPrintf(MODULE_NAME, LOG_LEVEL_DEBUG, "ChannelAlloc Debug: PopOutSequenceNO to update t.cm[bid.id=%d])=(%d,%d), CM.size=%d\n", order.ID, ioSeq.inSeq, ioSeq.outSeq, len(t.cm))
-		return vOrderSeq.outSeq + 1, ReturnStatus_RETRY
-	} else {
-		delete(t.cm, order.ID)
-		DebugPrintf(MODULE_NAME, LOG_LEVEL_DEBUG, "ChannelAlloc Debug: PopCancelSequenceNO to remove t.cm[order.id=%d])=(%d,%d), CM.size=%d\n", order.ID, vOrderSeq.inSeq, vOrderSeq.outSeq, len(t.cm))
-
-		return vOrderSeq.outSeq + 1, ReturnStatus_OK
-	}
-}
-
-func (t *ChannelAlloc) GetMatchTradeChannel() int {
-	channelNO := t.fn()
-	DebugPrintf(MODULE_NAME, LOG_LEVEL_DEBUG, "ChannelAlloc Debug: GetMatchTradeChannel(%d) to MatchTrade output\n", channelNO)
-	return channelNO
-}
-
-func (t *ChannelAlloc) GetCancelOrderChannel() int {
-	channelNO := t.fn()
-	DebugPrintf(MODULE_NAME, LOG_LEVEL_DEBUG, "ChannelAlloc Debug: GetCancelOrderChannel(%d) to CancelOrder output\n", channelNO)
-	return channelNO
-}
-
-func (t *ChannelAlloc) DumpCMBuff() string {
-	strBuff := fmt.Sprintf("==================[ChannelAlloc CM Dump Start]==================\n")
-	count := 0
-	for k, v := range t.cm {
-		strBuff = fmt.Sprintf(strBuff+"ID:%d\t\tIOSeq:[iSeq(%d), oSeq(%d)]\n", k, v.inSeq, v.outSeq)
-		count++
-	}
-	strBuff = fmt.Sprintf(strBuff+"ChannelAlloc CM Total size(%d)\n", count)
-	strBuff = fmt.Sprintf(strBuff + "==================[ChannelAlloc CM Dump  End]==================\n")
-
-	return strBuff
-}
-
-/// debug:
-func (t *ChannelAlloc) GetLen() int {
-	return len(t.cm)
-}
-
-type CursorLoop struct {
-	cursor int
-	length int
-
-	ca *ChannelAlloc
-}
-
-func newCursorLoop(l int) *CursorLoop {
-	obj := new(CursorLoop)
-	obj.cursor = 0
-	obj.length = l
-	obj.ca = newChannelAlloc(obj.GetNewChannel)
-	return obj
-}
-
-func (t *CursorLoop) GetNewChannel() int {
-	t.cursor++
-	if t.cursor >= t.length {
-		t.cursor = 0
-	}
-	return t.cursor
-}
-
-func (t *CursorLoop) ErrCheck(cur int) bool {
-	if cur < 0 || cur >= t.length {
-		panic(fmt.Errorf("CursorLoop ErrCheck in cur(%d) fail.", cur))
-		return false
-	}
-	return true
-}
-
-type OutPutPool struct {
-	outChannel [OUTCHANNEL_POOL_SIZE]chan *OutPoolElem
-	cur        *CursorLoop
-}
-
-func newOutPutPool() *OutPutPool {
-	obj := new(OutPutPool)
-	///obj.cur = CursorLoop{cursor: 0, length: OUTCHANNEL_POOL_SIZE, ChannelAlloc: ChannelAlloc{make(map[int64]int), nil}}
-	obj.cur = newCursorLoop(OUTCHANNEL_POOL_SIZE)
-	for i := 0; i < obj.cur.length; i++ {
-		obj.outChannel[i] = make(chan *OutPoolElem, OUTCHANNEL_BUFF_SIZE)
-	}
-
-	return obj
-}
-func (t *OutPutPool) Size() int {
-	return t.cur.length
-}
-func (t *OutPutPool) Len() int {
-	sum := 0
-	for i := 0; i < OUTCHANNEL_POOL_SIZE; i++ {
-		sum += len(t.outChannel[i])
-	}
-	return sum
-}
-func (t *OutPutPool) DumpBuff() string {
-	strBuff := fmt.Sprintf("==================[OutPutPool Infoo]==================\n")
-	for i := 0; i < OUTCHANNEL_POOL_SIZE; i++ {
-		strBuff += fmt.Sprintf("out channel[%4d]: [cap=%d, len=%d]\n", i, cap(t.outChannel[i]), len(t.outChannel[i]))
-	}
-	strBuff += fmt.Sprintf("======================================================\n")
-	return strBuff
-}
-func (t *OutPutPool) Dump() {
-	strBuff := t.DumpBuff()
-	fmt.Print(strBuff)
-}
-func (t *OutPutPool) Start(tp *TradePool) {
-	for i := 0; i < t.cur.length; i++ {
-		go tp.output(i)
-	}
-}
-func (t *OutPutPool) In(mt *OutPoolElem) {
-	switch mt.type_ {
-	case OUTPOOL_MATCHTRADE:
-		bidSeq, askSeq := t.cur.ca.GetInSequenceNO(mt.trade.bidTrade, mt.trade.askTrade)
-		mt.trade.bidCount = bidSeq
-		mt.trade.askCount = askSeq
-		channelNO := t.cur.ca.GetMatchTradeChannel()
-		t.outChannel[channelNO] <- mt
-		DebugPrintf(MODULE_NAME, LOG_LEVEL_TRACK,
-			"OutPutPool Debug: OUTPOOL_MATCHTRADE In OutPutPool(%d)[Len(%d)Used(%d)], trade(bidID:%d, askID:%d)\n",
-			channelNO, OUTCHANNEL_BUFF_SIZE, len(t.outChannel[channelNO]), mt.trade.bidTrade.ID, mt.trade.askTrade.ID)
-
-	case OUTPOOL_CANCELORDER:
-		orderSeq := t.cur.ca.GetInCancelSeqNO(mt.cancelOrder.order)
-		mt.cancelOrder.count = orderSeq
-		channelNO := t.cur.ca.GetCancelOrderChannel()
-		t.outChannel[channelNO] <- mt
-		DebugPrintf(MODULE_NAME, LOG_LEVEL_TRACK,
-			"OutPutPool Debug: OUTPOOL_CANCELORDER In OutPutPool(%d)[Len(%d)Used(%d)], order(%d)\n",
-			channelNO, OUTCHANNEL_BUFF_SIZE, len(t.outChannel[channelNO]), mt.cancelOrder.order.ID)
-	}
-}
-
-func (t *OutPutPool) Out(cursor int) (mt *OutPoolElem, bRet bool) {
-	if !t.cur.ErrCheck(cursor) {
-		return nil, false
-	}
-
-	mt, ok := <-t.outChannel[cursor]
-	if !ok {
-		panic(fmt.Errorf("Output Channel[%d] closed error.", cursor))
-	}
-
-	switch mt.type_ {
-	case OUTPOOL_MATCHTRADE:
-		bidSeq, askSeq := t.cur.ca.GetOutSequenceNO(mt.trade.bidTrade, mt.trade.askTrade)
-		if mt.trade.bidCount == bidSeq+1 && mt.trade.askCount == askSeq+1 {
-			bidSeq, askSeq = t.cur.ca.PopOutSequenceNO(mt.trade.bidTrade, mt.trade.askTrade)
-			DebugPrintf(MODULE_NAME, LOG_LEVEL_TRACK,
-				"OutPutPool(%d)[Len(%d)Used(%d)] Out MatchTrade(%s): Bid ID(%d), Ask ID(%d), mt[bidCount(%d), askCount(%d)], Expect(Bid(%d), Ask(%d)), Meet condition and will act immediately.\n",
-				cursor, OUTCHANNEL_BUFF_SIZE, len(t.outChannel[cursor]), mt.trade.bidTrade.Symbol, mt.trade.bidTrade.ID, mt.trade.askTrade.ID, mt.trade.bidCount, mt.trade.askCount, bidSeq, askSeq,
-			)
-			return mt, true
-		} else {
-			channelNO := t.cur.ca.GetMatchTradeChannel()
-			go func() {
-				time.Sleep(1 * time.Millisecond)
-				t.outChannel[channelNO] <- mt
-			}()
-
-			DebugPrintf(MODULE_NAME, LOG_LEVEL_TRACK,
-				"OutPutPool(%d)[Len(%d)Used(%d)] Out MatchTrade(%s): Bid ID(%d), Ask ID(%d), mt[bidCount(%d), askCount(%d)], Expect(Bid(%d), Ask(%d)), Not Really Output, reput into channel(%d).\n",
-				cursor, OUTCHANNEL_BUFF_SIZE, len(t.outChannel[cursor]), mt.trade.bidTrade.Symbol, mt.trade.bidTrade.ID, mt.trade.askTrade.ID, mt.trade.bidCount, mt.trade.askCount, bidSeq+1, askSeq+1, channelNO,
-			)
-			return mt, false
-		}
-
-	case OUTPOOL_CANCELORDER:
-		orderSeq := t.cur.ca.GetCancelSequenceNO(mt.cancelOrder.order)
-		if mt.cancelOrder.count == orderSeq+1 {
-			orderSeq, ret := t.cur.ca.PopCancelSequenceNO(mt.cancelOrder.order)
-			if ret == ReturnStatus_OK {
-				DebugPrintf(MODULE_NAME, LOG_LEVEL_TRACK,
-					"OutPutPool(%d)[Len(%d)Used(%d)] Out CancelOrder(%s): Order ID(%d), order[count(%d)], Expect[count(%d)], Meet condition and will act immediately.\n",
-					cursor, OUTCHANNEL_BUFF_SIZE, len(t.outChannel[cursor]), mt.cancelOrder.order.Symbol, mt.cancelOrder.order.ID, mt.cancelOrder.count, orderSeq,
-				)
-				return mt, true
-			} else if ret == ReturnStatus_RETRY {
-				go func() {
-					time.Sleep(1 * time.Millisecond)
-					t.In(mt)
-				}()
-
-				DebugPrintf(MODULE_NAME, LOG_LEVEL_TRACK,
-					"OutPutPool(%d)[Len(%d)Used(%d)] Out CancelOrder(%s): Order ID(%d), order[count(%d)], Expect[count(%d)], Cancel operate reached behind normal trade out, reinchannel to process it.\n",
-					cursor, OUTCHANNEL_BUFF_SIZE, len(t.outChannel[cursor]), mt.cancelOrder.order.Symbol, mt.cancelOrder.order.ID, mt.cancelOrder.count, orderSeq,
-				)
-				return mt, false
-			} else {
-				panic(fmt.Errorf("PopCancelSequenceNO return a illegal value can not be realized."))
-			}
-
-		} else {
-			channelNO := t.cur.ca.GetCancelOrderChannel()
-			go func() {
-				time.Sleep(1 * time.Millisecond)
-				t.outChannel[channelNO] <- mt
-			}()
-
-			DebugPrintf(MODULE_NAME, LOG_LEVEL_TRACK,
-				"OutPutPool(%d)[Len(%d)Used(%d)] Out CancelOrder(%s): Order ID(%d), order[count(%d)], Expect[count(%d)],, Not Really Output, reput into channel(%d).\n",
-				cursor, OUTCHANNEL_BUFF_SIZE, len(t.outChannel[cursor]), mt.cancelOrder.order.Symbol, mt.cancelOrder.order.ID, mt.cancelOrder.count, orderSeq+1, channelNO,
-			)
-			return mt, false
-		}
-	}
-
-	panic(fmt.Errorf("OutPutPool Out Process Logic Error, please check!"))
-}
-
 type Channel struct {
-	InChannelBlock chan *Order
+	InChannelBlock chan *comm.Order
 	InChannel      *InPutPool
-	outChannel     *OutPutPool
-	CancelChannel  chan *Order
+	MultiChanOut   *chansIO.MultiChans_Out
+	CancelChannel  chan *comm.Order
 }
 
 ///------------------------------------------------------------------
 type Lock struct {
-	askPoolRWMutex *DebugLock
-	bidPoolRWMutex *DebugLock
+	askPoolRWMutex *comm.DebugLock
+	bidPoolRWMutex *comm.DebugLock
 }
 
 type Control struct {
@@ -569,27 +169,37 @@ type TradePool struct {
 	bidPoolSlice   []*list.Element
 	bidPoolIDSlice []*list.Element
 
-	//cancelIndex *IndexInt64
-
 	latestPrice float64
 
 	Channel
 	Lock
 	Control
 
-	debug        *DebugInfo
+	debug        *rt.DebugInfo
 	doctor       *doctor.Doctor
-	tickerEngine *TickerPool
+	tickerEngine *te.TickerPool
+	rt.OrderID
 }
 
-func NewTradePool(symbol string, mrketType config.MarketType, conf *config.MarketConfig, te *TickerPool) *TradePool {
+func NewTradePool(symbol string, mrketType config.MarketType, conf *config.MarketConfig, te *te.TickerPool) *TradePool {
 	o := new(TradePool)
 	o.doctor = doctor.NewDoctor()
 	o.Symbol = symbol
 	o.MarketConfig = conf
 	o.MarketType = mrketType
 	o.tickerEngine = te
-	o.latestPrice = te.newestPrice
+	o.latestPrice = te.GetNewestPrice()
+
+	s := strings.Split(symbol, "/")
+	if len(s) != 2 {
+		panic(fmt.Errorf("NewMEXCore.NewOrderID fail, as sym(%s) input illegal.", symbol))
+	}
+	vB, okB := config.GetCoinMapInt()[s[0]]
+	vQ, okQ := config.GetCoinMapInt()[s[1]]
+	if !okB || !okQ {
+		panic(fmt.Errorf("NewMEXCore.NewOrderID to GetCoinMapInt(%s) fail.", symbol))
+	}
+	o.OrderID = *rt.NewOrderID((int(vB) & 0x2f) | (int(vQ) & 0x2f))
 
 	///return o.init()
 	return o.setup()
@@ -603,7 +213,7 @@ func (I sortByAskPrice) Len() int {
 }
 
 func (I sortByAskPrice) Less(i, j int) bool {
-	return I[i].Value.(Order).Price < I[j].Value.(Order).Price
+	return I[i].Value.(comm.Order).Price < I[j].Value.(comm.Order).Price
 }
 
 func (I sortByAskPrice) Swap(i, j int) {
@@ -618,7 +228,7 @@ func (I sortByBidPrice) Len() int {
 }
 
 func (I sortByBidPrice) Less(i, j int) bool {
-	return I[i].Value.(Order).Price > I[j].Value.(Order).Price
+	return I[i].Value.(comm.Order).Price > I[j].Value.(comm.Order).Price
 }
 
 func (I sortByBidPrice) Swap(i, j int) {
@@ -633,7 +243,7 @@ func (I sortByTime) Len() int {
 }
 
 func (I sortByTime) Less(i, j int) bool {
-	return I[i].Value.(Order).Timestamp < I[j].Value.(Order).Timestamp
+	return I[i].Value.(comm.Order).Timestamp < I[j].Value.(comm.Order).Timestamp
 }
 
 func (I sortByTime) Swap(i, j int) {
@@ -648,7 +258,7 @@ func (I sortOrderByID) Len() int {
 }
 
 func (I sortOrderByID) Less(i, j int) bool {
-	return I[i].Value.(Order).ID < I[j].Value.(Order).ID
+	return I[i].Value.(comm.Order).ID < I[j].Value.(comm.Order).ID
 }
 
 func (I sortOrderByID) Swap(i, j int) {
@@ -683,7 +293,7 @@ func (t *TradePool) dumpBuff() (askCount int, askSliceCount int, askIDSliceCount
 	e := t.askPool.Front()
 	for elem := e; elem != nil; elem = elem.Next() {
 		strBuff = fmt.Sprintf(strBuff+"ASK ORDER=== symbol:%s, id:%d, user:%s, price:%f, time:%d, volume:%f\n",
-			elem.Value.(Order).Symbol, elem.Value.(Order).ID, elem.Value.(Order).Who, elem.Value.(Order).Price, elem.Value.(Order).Timestamp, elem.Value.(Order).Volume,
+			elem.Value.(comm.Order).Symbol, elem.Value.(comm.Order).ID, elem.Value.(comm.Order).Who, elem.Value.(comm.Order).Price, elem.Value.(comm.Order).Timestamp, elem.Value.(comm.Order).Volume,
 		)
 		askCount++
 	}
@@ -693,7 +303,7 @@ func (t *TradePool) dumpBuff() (askCount int, askSliceCount int, askIDSliceCount
 	askSliceCount = 0
 	for _, elem := range t.askPoolSlice {
 		strBuff = fmt.Sprintf(strBuff+"ASK ORDER=== symbol:%s, id:%d, user:%s, price:%f, time:%d, volume:%f\n",
-			elem.Value.(Order).Symbol, elem.Value.(Order).ID, elem.Value.(Order).Who, elem.Value.(Order).Price, elem.Value.(Order).Timestamp, elem.Value.(Order).Volume,
+			elem.Value.(comm.Order).Symbol, elem.Value.(comm.Order).ID, elem.Value.(comm.Order).Who, elem.Value.(comm.Order).Price, elem.Value.(comm.Order).Timestamp, elem.Value.(comm.Order).Volume,
 		)
 		askSliceCount++
 	}
@@ -703,7 +313,7 @@ func (t *TradePool) dumpBuff() (askCount int, askSliceCount int, askIDSliceCount
 	askIDSliceCount = 0
 	for _, elem := range t.askPoolIDSlice {
 		strBuff = fmt.Sprintf(strBuff+"ASK ORDER=== symbol:%s, id:%d, user:%s, price:%f, time:%d, volume:%f\n",
-			elem.Value.(Order).Symbol, elem.Value.(Order).ID, elem.Value.(Order).Who, elem.Value.(Order).Price, elem.Value.(Order).Timestamp, elem.Value.(Order).Volume,
+			elem.Value.(comm.Order).Symbol, elem.Value.(comm.Order).ID, elem.Value.(comm.Order).Who, elem.Value.(comm.Order).Price, elem.Value.(comm.Order).Timestamp, elem.Value.(comm.Order).Volume,
 		)
 		askIDSliceCount++
 	}
@@ -715,7 +325,7 @@ func (t *TradePool) dumpBuff() (askCount int, askSliceCount int, askIDSliceCount
 	e = t.bidPool.Front()
 	for elem := e; elem != nil; elem = elem.Next() {
 		strBuff = fmt.Sprintf(strBuff+"BID ORDER=== symbol:%s, id:%d, user:%s, price:%f, time:%d, volume:%f\n",
-			elem.Value.(Order).Symbol, elem.Value.(Order).ID, elem.Value.(Order).Who, elem.Value.(Order).Price, elem.Value.(Order).Timestamp, elem.Value.(Order).Volume,
+			elem.Value.(comm.Order).Symbol, elem.Value.(comm.Order).ID, elem.Value.(comm.Order).Who, elem.Value.(comm.Order).Price, elem.Value.(comm.Order).Timestamp, elem.Value.(comm.Order).Volume,
 		)
 		bidCount++
 	}
@@ -725,7 +335,7 @@ func (t *TradePool) dumpBuff() (askCount int, askSliceCount int, askIDSliceCount
 	bidSliceCount = 0
 	for _, elem := range t.bidPoolSlice {
 		strBuff = fmt.Sprintf(strBuff+"BID ORDER=== symbol:%s, id:%d, user:%s, price:%f, time:%d, volume:%f\n",
-			elem.Value.(Order).Symbol, elem.Value.(Order).ID, elem.Value.(Order).Who, elem.Value.(Order).Price, elem.Value.(Order).Timestamp, elem.Value.(Order).Volume,
+			elem.Value.(comm.Order).Symbol, elem.Value.(comm.Order).ID, elem.Value.(comm.Order).Who, elem.Value.(comm.Order).Price, elem.Value.(comm.Order).Timestamp, elem.Value.(comm.Order).Volume,
 		)
 		bidSliceCount++
 	}
@@ -736,7 +346,7 @@ func (t *TradePool) dumpBuff() (askCount int, askSliceCount int, askIDSliceCount
 	bidIDSliceCount = 0
 	for _, elem := range t.bidPoolIDSlice {
 		strBuff = fmt.Sprintf(strBuff+"BID ORDER=== symbol:%s, id:%d, user:%s, price:%f, time:%d, volume:%f\n",
-			elem.Value.(Order).Symbol, elem.Value.(Order).ID, elem.Value.(Order).Who, elem.Value.(Order).Price, elem.Value.(Order).Timestamp, elem.Value.(Order).Volume,
+			elem.Value.(comm.Order).Symbol, elem.Value.(comm.Order).ID, elem.Value.(comm.Order).Who, elem.Value.(comm.Order).Price, elem.Value.(comm.Order).Timestamp, elem.Value.(comm.Order).Volume,
 		)
 		bidIDSliceCount++
 	}
@@ -761,7 +371,7 @@ func (t *TradePool) dumpPrint() {
 	e := t.askPool.Front()
 	for elem := e; elem != nil; elem = elem.Next() {
 		fmt.Printf("ASK ORDER=== symbol:%s, id:%d, user:%s, price:%f, time:%d, volume:%f\n",
-			elem.Value.(Order).Symbol, elem.Value.(Order).ID, elem.Value.(Order).Who, elem.Value.(Order).Price, elem.Value.(Order).Timestamp, elem.Value.(Order).Volume,
+			elem.Value.(comm.Order).Symbol, elem.Value.(comm.Order).ID, elem.Value.(comm.Order).Who, elem.Value.(comm.Order).Price, elem.Value.(comm.Order).Timestamp, elem.Value.(comm.Order).Volume,
 		)
 		askCount++
 	}
@@ -771,7 +381,7 @@ func (t *TradePool) dumpPrint() {
 	askSliceCount = 0
 	for _, elem := range t.askPoolSlice {
 		fmt.Printf("ASK ORDER=== symbol:%s, id:%d, user:%s, price:%f, time:%d, volume:%f\n",
-			elem.Value.(Order).Symbol, elem.Value.(Order).ID, elem.Value.(Order).Who, elem.Value.(Order).Price, elem.Value.(Order).Timestamp, elem.Value.(Order).Volume,
+			elem.Value.(comm.Order).Symbol, elem.Value.(comm.Order).ID, elem.Value.(comm.Order).Who, elem.Value.(comm.Order).Price, elem.Value.(comm.Order).Timestamp, elem.Value.(comm.Order).Volume,
 		)
 		askSliceCount++
 	}
@@ -781,7 +391,7 @@ func (t *TradePool) dumpPrint() {
 	askIDSliceCount = 0
 	for _, elem := range t.askPoolIDSlice {
 		fmt.Printf("ASK ORDER=== symbol:%s, id:%d, user:%s, price:%f, time:%d, volume:%f\n",
-			elem.Value.(Order).Symbol, elem.Value.(Order).ID, elem.Value.(Order).Who, elem.Value.(Order).Price, elem.Value.(Order).Timestamp, elem.Value.(Order).Volume,
+			elem.Value.(comm.Order).Symbol, elem.Value.(comm.Order).ID, elem.Value.(comm.Order).Who, elem.Value.(comm.Order).Price, elem.Value.(comm.Order).Timestamp, elem.Value.(comm.Order).Volume,
 		)
 		askIDSliceCount++
 	}
@@ -793,7 +403,7 @@ func (t *TradePool) dumpPrint() {
 	e = t.bidPool.Front()
 	for elem := e; elem != nil; elem = elem.Next() {
 		fmt.Printf("BID ORDER=== symbol:%s, id:%d, user:%s, price:%f, time:%d, volume:%f\n",
-			elem.Value.(Order).Symbol, elem.Value.(Order).ID, elem.Value.(Order).Who, elem.Value.(Order).Price, elem.Value.(Order).Timestamp, elem.Value.(Order).Volume,
+			elem.Value.(comm.Order).Symbol, elem.Value.(comm.Order).ID, elem.Value.(comm.Order).Who, elem.Value.(comm.Order).Price, elem.Value.(comm.Order).Timestamp, elem.Value.(comm.Order).Volume,
 		)
 		bidCount++
 	}
@@ -803,7 +413,7 @@ func (t *TradePool) dumpPrint() {
 	bidSliceCount = 0
 	for _, elem := range t.bidPoolSlice {
 		fmt.Printf("BID ORDER=== symbol:%s, id:%d, user:%s, price:%f, time:%d, volume:%f\n",
-			elem.Value.(Order).Symbol, elem.Value.(Order).ID, elem.Value.(Order).Who, elem.Value.(Order).Price, elem.Value.(Order).Timestamp, elem.Value.(Order).Volume,
+			elem.Value.(comm.Order).Symbol, elem.Value.(comm.Order).ID, elem.Value.(comm.Order).Who, elem.Value.(comm.Order).Price, elem.Value.(comm.Order).Timestamp, elem.Value.(comm.Order).Volume,
 		)
 		bidSliceCount++
 	}
@@ -814,7 +424,7 @@ func (t *TradePool) dumpPrint() {
 	bidIDSliceCount = 0
 	for _, elem := range t.bidPoolIDSlice {
 		fmt.Printf("BID ORDER=== symbol:%s, id:%d, user:%s, price:%f, time:%d, volume:%f\n",
-			elem.Value.(Order).Symbol, elem.Value.(Order).ID, elem.Value.(Order).Who, elem.Value.(Order).Price, elem.Value.(Order).Timestamp, elem.Value.(Order).Volume,
+			elem.Value.(comm.Order).Symbol, elem.Value.(comm.Order).ID, elem.Value.(comm.Order).Who, elem.Value.(comm.Order).Price, elem.Value.(comm.Order).Timestamp, elem.Value.(comm.Order).Volume,
 		)
 		bidIDSliceCount++
 	}
@@ -889,20 +499,6 @@ func (t *TradePool) DumpBeatHeart() string {
 	return strBuff
 }
 
-func (t *TradePool) DumpCM() string {
-	strBuff := fmt.Sprintf("==================[%s-%s Output Pool Info]=====================\n", t.Symbol, t.MarketType.String())
-	formate := "2006-01-02T15:04:05Z07:00"
-	loc, _ := time.LoadLocation("Local")
-	strBuff = fmt.Sprintf(strBuff+"Date Time: %s\n", time.Now().In(loc).Format(formate))
-
-	strDetail := t.outChannel.cur.ca.DumpCMBuff()
-
-	strBuff = fmt.Sprintf(strBuff + strDetail + "============================================================\n")
-
-	fmt.Print(strBuff)
-	return strBuff
-}
-
 func (t *TradePool) DumpChannel() string {
 	strBuff := fmt.Sprintf("==================[%s-%s Channel Infoo]=====================\n", t.Symbol, t.MarketType.String())
 	formate := "2006-01-02T15:04:05Z07:00"
@@ -911,13 +507,20 @@ func (t *TradePool) DumpChannel() string {
 
 	strBuff += fmt.Sprintf("Inchannel Status\t: num=%d * (cap=%d, len=%d)\n", INCHANNEL_POOL_SIZE, INCHANNEL_BUFF_SIZE, t.InChannel.Len())
 	strBuff += fmt.Sprintf("CancelChannel Status\t: cap=%d, len=%d\n", CANCELCHANNEL_BUFF_SIZE, len(t.CancelChannel))
-	strBuff += fmt.Sprintf("OutPutPool Status\t: num=%d * (cap=%d, len=%d)\n", OUTCHANNEL_POOL_SIZE, OUTCHANNEL_BUFF_SIZE, t.outChannel.Len())
-	strBuff += t.outChannel.DumpBuff()
 
 	strBuff = fmt.Sprintf(strBuff + "=======================================================\n")
 
 	fmt.Print(strBuff)
 	return strBuff
+}
+
+func (t *TradePool) DumpChanlsMap() {
+	fmt.Printf("==================[%s-%s Channel Map Infoo]=====================\n", t.Symbol, t.MarketType.String())
+	formate := "2006-01-02T15:04:05Z07:00"
+	loc, _ := time.LoadLocation("Local")
+	fmt.Printf("Date Time: %s\n", time.Now().In(loc).Format(formate))
+	t.MultiChanOut.Dump()
+	fmt.Printf("=======================================================\n")
 }
 
 func (t *TradePool) GetChannel() Channel {
@@ -938,14 +541,21 @@ func (t *TradePool) IsFaulty() bool {
 
 	isCancelFaulty := t.doctor.IsCancelOrderFault() && len(t.CancelChannel) >= FAULTY_DIAGNOSE_MIN_TASK_PROTECT
 	isMatchFaulty := t.doctor.IsMatchCoreFault()
-	isOutpoolFaulty := t.doctor.IsOutpoolFault() && t.outChannel.Len() >= FAULTY_DIAGNOSE_MIN_TASK_PROTECT
 	return isEnorderFaulty ||
 		isCancelFaulty ||
-		isMatchFaulty ||
-		isOutpoolFaulty /*|| isLaunchFaulty  */
+		isMatchFaulty
+
 }
 
 ///------------------------------------------------------------------
+func (t *TradePool) RestartDebuginfo() {
+	t.debug.DebugInfo_RestartDebuginfo()
+}
+
+func (t *TradePool) ResetMatchCorePerform() {
+	t.debug.DebugInfo_ResetMatchCorePerform()
+}
+
 func (t *TradePool) GetTradeCompleteRate() float64 {
 	return t.debug.DebugInfo_GetTradeCompleteRate()
 }
@@ -962,45 +572,45 @@ func (t *TradePool) GetPoolLen() int {
 	return len(t.bidPoolSlice) + len(t.askPoolSlice)
 }
 
-func (t *TradePool) GetAskLevelOrders(limit int64) []*Order {
-	var os []*Order
+func (t *TradePool) GetAskLevelOrders(limit int64) []*comm.Order {
+	var os []*comm.Order
 
 	for c, elem := range t.askPoolSlice {
 		if int64(c) >= limit {
 			break
 		}
-		o := elem.Value.(Order)
+		o := elem.Value.(comm.Order)
 		os = append(os, &o)
 	}
 	return os
 }
 
-func (t *TradePool) GetBidLevelOrders(limit int64) []*Order {
-	var os []*Order
+func (t *TradePool) GetBidLevelOrders(limit int64) []*comm.Order {
+	var os []*comm.Order
 
 	for c, elem := range t.bidPoolSlice {
 		if int64(c) >= limit {
 			break
 		}
-		o := elem.Value.(Order)
+		o := elem.Value.(comm.Order)
 		os = append(os, &o)
 	}
 	return os
 }
 
-func (t *TradePool) GetAskLevelsGroupByPrice(limit int64) []OrderLevel {
+func (t *TradePool) GetAskLevelsGroupByPrice(limit int64) []comm.OrderLevel {
 	var (
-		ols                []OrderLevel /*= make([]OrderLevel, limit)*/
-		ol                 OrderLevel   = OrderLevel{float64(0), float64(0), float64(0)}
-		curPrice, prePrice float64      = float64(0), float64(0)
-		levels             int64        = 0
-		levelFull          bool         = false
+		ols                []comm.OrderLevel /*= make([]OrderLevel, limit)*/
+		ol                 comm.OrderLevel   = comm.OrderLevel{float64(0), float64(0), float64(0)}
+		curPrice, prePrice float64           = float64(0), float64(0)
+		levels             int64             = 0
+		levelFull          bool              = false
 	)
 
 	/// do read protect
 	for _, elem := range t.askPoolSlice {
 
-		curPrice = elem.Value.(Order).Price
+		curPrice = elem.Value.(comm.Order).Price
 
 		if curPrice != prePrice {
 			if prePrice != 0 {
@@ -1010,16 +620,16 @@ func (t *TradePool) GetAskLevelsGroupByPrice(limit int64) []OrderLevel {
 					levelFull = true
 					break
 				}
-				ol = OrderLevel{float64(0), float64(0), float64(0)}
+				ol = comm.OrderLevel{float64(0), float64(0), float64(0)}
 			}
 			prePrice = curPrice
 			ol.Price = curPrice
-			ol.Volume = elem.Value.(Order).Volume
-			ol.TotalVolume = elem.Value.(Order).TotalVolume
+			ol.Volume = elem.Value.(comm.Order).Volume
+			ol.TotalVolume = elem.Value.(comm.Order).TotalVolume
 
 		} else {
-			ol.Volume += elem.Value.(Order).Volume
-			ol.TotalVolume += elem.Value.(Order).TotalVolume
+			ol.Volume += elem.Value.(comm.Order).Volume
+			ol.TotalVolume += elem.Value.(comm.Order).TotalVolume
 		}
 	}
 
@@ -1029,19 +639,19 @@ func (t *TradePool) GetAskLevelsGroupByPrice(limit int64) []OrderLevel {
 	return ols
 }
 
-func (t *TradePool) GetBidLevelsGroupByPrice(limit int64) []OrderLevel {
+func (t *TradePool) GetBidLevelsGroupByPrice(limit int64) []comm.OrderLevel {
 	var (
-		ols                []OrderLevel /*= make([]OrderLevel, limit)*/
-		ol                 OrderLevel   = OrderLevel{float64(0), float64(0), float64(0)}
-		curPrice, prePrice float64      = float64(0), float64(0)
-		levels             int64        = 0
-		levelFull          bool         = false
+		ols                []comm.OrderLevel /*= make([]OrderLevel, limit)*/
+		ol                 comm.OrderLevel   = comm.OrderLevel{float64(0), float64(0), float64(0)}
+		curPrice, prePrice float64           = float64(0), float64(0)
+		levels             int64             = 0
+		levelFull          bool              = false
 	)
 
 	/// do read protect
 	for _, elem := range t.bidPoolSlice {
 
-		curPrice = elem.Value.(Order).Price
+		curPrice = elem.Value.(comm.Order).Price
 
 		if curPrice != prePrice {
 			if prePrice != 0 {
@@ -1051,16 +661,16 @@ func (t *TradePool) GetBidLevelsGroupByPrice(limit int64) []OrderLevel {
 					levelFull = true
 					break
 				}
-				ol = OrderLevel{float64(0), float64(0), float64(0)}
+				ol = comm.OrderLevel{float64(0), float64(0), float64(0)}
 			}
 			prePrice = curPrice
 			ol.Price = curPrice
-			ol.Volume = elem.Value.(Order).Volume
-			ol.TotalVolume = elem.Value.(Order).TotalVolume
+			ol.Volume = elem.Value.(comm.Order).Volume
+			ol.TotalVolume = elem.Value.(comm.Order).TotalVolume
 
 		} else {
-			ol.Volume += elem.Value.(Order).Volume
-			ol.TotalVolume += elem.Value.(Order).TotalVolume
+			ol.Volume += elem.Value.(comm.Order).Volume
+			ol.TotalVolume += elem.Value.(comm.Order).TotalVolume
 		}
 	}
 
@@ -1077,7 +687,7 @@ func (t *TradePool) Statics() string {
 	strBuff = fmt.Sprintf(strBuff+"BID ORDERS		: %d\n", t.debug.DebugInfo_GetUserBidEnOrders())
 
 	strBuff = fmt.Sprintf(strBuff + "=====================(Add+QuickAdd)======================\n")
-	strBuff = fmt.Sprintf(strBuff+"ORDER total	: %d\n", t.debug.DebugInfo_GetEnOrders())
+	strBuff = fmt.Sprintf(strBuff+"ORDER total		: %d\n", t.debug.DebugInfo_GetEnOrders())
 	strBuff = fmt.Sprintf(strBuff+"ASK ORDERS		: %d\n", t.debug.DebugInfo_GetAskEnOrders())
 	strBuff = fmt.Sprintf(strBuff+"BID ORDERS		: %d\n", t.debug.DebugInfo_GetBidEnOrders())
 
@@ -1089,11 +699,15 @@ func (t *TradePool) Statics() string {
 	strBuff = fmt.Sprintf(strBuff+"Trade Complete Rate	: %f\n", t.debug.DebugInfo_GetTradeCompleteRate())
 	strBuff = fmt.Sprintf(strBuff+"Trade Output Rate	: %f\n", t.debug.DebugInfo_GetTradeOutputRate())
 	strBuff = fmt.Sprintf(strBuff+"Trade UserInput Rate	: %f\n", t.debug.DebugInfo_GetUserEnOrderRate())
+	strBuff = fmt.Sprintf(strBuff + "----------------------------------------------------------\n")
+	max, min, ave := t.debug.DebugInfo_GetCorePerform()
+	strBuff = fmt.Sprintf(strBuff+"Match core performance(second/round): min=%.9f, max=%.9f, ave=%.9f\n", min, max, ave)
+	strBuff = fmt.Sprintf(strBuff + "----------------------------------------------------------\n")
 
 	strBuff = fmt.Sprintf(strBuff + "================[Trade Output Pool Status]===============\n")
 	strBuff = fmt.Sprintf(strBuff+"Ask Pool Scale	:	%d\n", t.askPool.Len())
 	strBuff = fmt.Sprintf(strBuff+"Bid Pool Scale	:	%d\n", t.bidPool.Len())
-	strBuff = fmt.Sprintf(strBuff+"Newest Price	:	%f\n", t.latestPrice)
+	strBuff = fmt.Sprintf(strBuff+"Newest Price		:	%f\n", t.latestPrice)
 
 	strBuff = fmt.Sprintf(strBuff + "----------------------------------------------------------\n")
 	strBuff = fmt.Sprintf(strBuff+"InChannel Pool Work Mode:	%s\n", config.GetMEConfig().InPoolMode)
@@ -1109,11 +723,12 @@ func (t *TradePool) Statics() string {
 	strBuff = fmt.Sprintf(strBuff+"InChannel Pool Len	:	%d\n", t.InChannel.Len())                       ///(buff total usage)
 	strBuff = fmt.Sprintf(strBuff+"InChannel Pool Current Channel:	%d\n", t.InChannel.GetChannel())     ///(order output serialize map scale)
 	strBuff = fmt.Sprintf(strBuff + "----------------------------------------------------------\n")
-	strBuff = fmt.Sprintf(strBuff+"OutChannel Pool Size	:	%d\n", OUTCHANNEL_POOL_SIZE)                     ///(channel num)
-	strBuff = fmt.Sprintf(strBuff+"OutChannel Buff Size	:	%d\n", OUTCHANNEL_BUFF_SIZE)                     ///(buff size per chan)
-	strBuff = fmt.Sprintf(strBuff+"OutChannel Pool Cap	:	%d\n", OUTCHANNEL_BUFF_SIZE*OUTCHANNEL_POOL_SIZE) ///(total buff size)
-	strBuff = fmt.Sprintf(strBuff+"OutChannel Pool Len	:	%d\n", t.outChannel.Len())                        ///(buff total usage)
-	strBuff = fmt.Sprintf(strBuff+"OutChannel Pool ID Map Scale:	%d\n", t.outChannel.cur.ca.GetLen())      ///(order output serialize map scale)
+	strBuff = fmt.Sprintf(strBuff + "----------------------------------------------------------\n")
+	strBuff = fmt.Sprintf(strBuff+"MultiChansOut Status	:	Pool size = %d\n", t.MultiChanOut.Len())
+	strBuff = fmt.Sprintf(strBuff+"MultiChansOut Status	:	Chan size = %d\n", t.MultiChanOut.ChanCap())
+	IDs, CHs, chnums := t.MultiChanOut.GetChanUseStatus()
+	strBuff = fmt.Sprintf(strBuff+"MultiChansOut Chans Usage status: %d; %d; %d\n", IDs, CHs, chnums)
+
 	strBuff = fmt.Sprintf(strBuff + "=======================================================\n")
 
 	fmt.Print(strBuff)
@@ -1165,7 +780,7 @@ func SortOrderByID(r sortOrderByID) []*list.Element {
 	///debug ==
 	//	fmt.Println("poolsice Before sort by id:========================\n")
 	//	for _, elem := range r {
-	//		fmt.Print(elem.Value.(Order).ID, "; ", elem.Value.(Order).Timestamp, "\n")
+	//		fmt.Print(elem.Value.(comm.Order).ID, "; ", elem.Value.(comm.Order).Timestamp, "\n")
 	//	}
 
 	///sort the pool by price
@@ -1174,7 +789,7 @@ func SortOrderByID(r sortOrderByID) []*list.Element {
 	///debug ==
 	//	fmt.Println("poolsice After sort by id:========================\n")
 	//	for _, elem := range r {
-	//		fmt.Println(elem.Value.(Order).ID, "; ", elem.Value.(Order).Timestamp, "\n")
+	//		fmt.Println(elem.Value.(comm.Order).ID, "; ", elem.Value.(comm.Order).Timestamp, "\n")
 	//	}
 	return r
 }
@@ -1211,7 +826,7 @@ func SortByTime(r []*list.Element) []*list.Element {
 	start := 0
 	count := 1
 	for _, elem := range r[1:] {
-		if preElem.Value.(Order).Price == elem.Value.(Order).Price {
+		if preElem.Value.(comm.Order).Price == elem.Value.(comm.Order).Price {
 			sCount++
 		} else {
 			if sCount > 1 {
@@ -1247,14 +862,14 @@ func SortByTime(r []*list.Element) []*list.Element {
 	return r
 }
 
-func (t *TradePool) sortPool(p *list.List, ab TradeType) (sortPool *list.List, sortSlice []*list.Element, sortIDSlice []*list.Element) {
+func (t *TradePool) sortPool(p *list.List, ab comm.TradeType) (sortPool *list.List, sortSlice []*list.Element, sortIDSlice []*list.Element) {
 	r := getSlice(p)
 	if len(r) == 0 {
 		return p, make([]*list.Element, 0, 1), make([]*list.Element, 0, 1)
 	}
 
 	///sort the pool slice by price
-	if ab == TradeType_ASK {
+	if ab == comm.TradeType_ASK {
 		r = SortByAskPrice(r)
 	} else {
 		r = SortByBidPrice(r)
@@ -1320,9 +935,9 @@ func (t *TradePool) sortCancelPool(p *list.List) (sortPool *list.List, sortSlice
 }
 
 func (t *TradePool) initHistoryOrder() (size int64, err error) {
-	fmt.Printf("%s: Start to get history orders of %s-%s\n", MODULE_NAME, t.Symbol, t.MarketType.String())
+	fmt.Printf("%s: Start to get history orders of %s-%s\n", MODULE_NAME_SORTSLICE, t.Symbol, t.MarketType.String())
 	var (
-		hs []*Order
+		hs []*comm.Order
 	)
 	/// get orders from duration storage
 	switch t.MarketType {
@@ -1340,27 +955,27 @@ func (t *TradePool) initHistoryOrder() (size int64, err error) {
 		panic(err)
 	}
 	hsSize := len(hs)
-	fmt.Printf("%s: History orders(%s-%s) scale(%d)\n", MODULE_NAME, t.Symbol, t.MarketType.String(), hsSize)
+	fmt.Printf("%s: History orders(%s-%s) scale(%d)\n", MODULE_NAME_SORTSLICE, t.Symbol, t.MarketType.String(), hsSize)
 
 	/// Put them in ME
-	fmt.Printf("%s: Start to loading orders(%s-%s) to Match Engine...\n", MODULE_NAME, t.Symbol, t.MarketType.String())
+	fmt.Printf("%s: Start to loading orders(%s-%s) to Match Engine...\n", MODULE_NAME_SORTSLICE, t.Symbol, t.MarketType.String())
 	for count, order := range hs {
-		if order.AorB == TradeType_BID {
-			if order.Status == ORDER_SUBMIT || order.Status == ORDER_PARTIAL_FILLED {
+		if order.AorB == comm.TradeType_BID {
+			if order.Status == comm.ORDER_SUBMIT || order.Status == comm.ORDER_PARTIAL_FILLED {
 				t.bidPool.PushBack(*order)
 			} else {
-				DebugPrintf(MODULE_NAME, LOG_LEVEL_ALWAYS, "[InitHistoryOrders]: Market(%s) met illeagal orders with incorrect status in the order duration storage! It should be remove from DS.\n\tOrder info: User(%s), ID(%d), Status(%s)\n",
+				comm.DebugPrintf(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_ALWAYS, "[InitHistoryOrders]: Market(%s) met illeagal orders with incorrect status in the order duration storage! It should be remove from DS.\n\tOrder info: User(%s), ID(%d), Status(%s)\n",
 					t.Symbol, order.Who, order.ID, order.Status)
 				//				err := use_mysql.MEMySQLInstance().RmOrder(order.Who, order.ID, order.Symbol, nil)
 				//				if err != nil {
 				//					panic(fmt.Errorf("[InitHistoryOrders]: Met errors, should be fixed!"))
 				//				}
 			}
-		} else if order.AorB == TradeType_ASK {
-			if order.Status == ORDER_SUBMIT || order.Status == ORDER_PARTIAL_FILLED {
+		} else if order.AorB == comm.TradeType_ASK {
+			if order.Status == comm.ORDER_SUBMIT || order.Status == comm.ORDER_PARTIAL_FILLED {
 				t.askPool.PushBack(*order)
 			} else {
-				DebugPrintf(MODULE_NAME, LOG_LEVEL_ALWAYS, "[InitHistoryOrders]: Market(%s) met illeagal orders with incorrect status in the order duration storage! It should be remove from DS.\n\tOrder info: User(%s), ID(%d), Status(%s)\n",
+				comm.DebugPrintf(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_ALWAYS, "[InitHistoryOrders]: Market(%s) met illeagal orders with incorrect status in the order duration storage! It should be remove from DS.\n\tOrder info: User(%s), ID(%d), Status(%s)\n",
 					t.Symbol, order.Who, order.ID, order.Status)
 				//				err := use_mysql.MEMySQLInstance().RmOrder(order.Who, order.ID, order.Symbol, nil)
 				//				if err != nil {
@@ -1375,16 +990,16 @@ func (t *TradePool) initHistoryOrder() (size int64, err error) {
 			}
 		}
 		if count == 0 {
-			fmt.Printf("%s: %s-%s Adding orders: \n", MODULE_NAME, t.Symbol, t.MarketType.String())
+			fmt.Printf("%s: %s-%s Adding orders: \n", MODULE_NAME_SORTSLICE, t.Symbol, t.MarketType.String())
 		}
 		if count%1000 == 0 && count != 0 {
 			fmt.Printf("+1000..")
 			if count%10000 == 0 {
-				fmt.Printf("\n%sPercent: %f%%\n", MODULE_NAME, float64(count+1)*100/float64(hsSize))
+				fmt.Printf("\n%sPercent: %f%%\n", MODULE_NAME_SORTSLICE, float64(count+1)*100/float64(hsSize))
 			}
 		}
 	}
-	fmt.Printf("\n%s: Load %s-%s orders complete.\n", MODULE_NAME, t.Symbol, t.MarketType.String())
+	fmt.Printf("\n%s: Load %s-%s orders complete.\n", MODULE_NAME_SORTSLICE, t.Symbol, t.MarketType.String())
 	return int64(hsSize), nil
 }
 
@@ -1393,15 +1008,15 @@ func (t *TradePool) initTestData() {
 	for i := 0; i < TEST_DATA_SCALE; i++ {
 		volume := (10 + 10*float64(rand.Intn(10))/10)
 		price := 1 + float64(rand.Intn(3))/10
-		tmpBid := Order{time.Now().UnixNano(), "Hunter", TradeType_BID, t.Symbol,
-			time.Now().UnixNano(), price, price, volume, volume, 0.001, ORDER_SUBMIT, "localhost:IP"}
+		tmpBid := comm.Order{time.Now().UnixNano(), "Hunter", comm.TradeType_BID, t.Symbol,
+			time.Now().UnixNano(), price, price, volume, volume, 0.001, comm.ORDER_SUBMIT, "localhost:IP"}
 		t.bidPool.PushBack(tmpBid)
 	}
 	for i := 0; i < TEST_DATA_SCALE; i++ {
 		volume := (10 + 10*float64(rand.Intn(10))/10)
 		price := 1 + float64(rand.Intn(3))/10
-		tmpAsk := Order{time.Now().UnixNano(), "Hunter", TradeType_ASK, t.Symbol,
-			time.Now().UnixNano(), price, price, volume, volume, 0.001, ORDER_SUBMIT, "localhost:IP"}
+		tmpAsk := comm.Order{time.Now().UnixNano(), "Hunter", comm.TradeType_ASK, t.Symbol,
+			time.Now().UnixNano(), price, price, volume, volume, 0.001, comm.ORDER_SUBMIT, "localhost:IP"}
 		t.askPool.PushBack(tmpAsk)
 	}
 }
@@ -1432,10 +1047,10 @@ func (t *TradePool) init() *TradePool {
 	//	t.Dump()
 
 	//// sort the trade pool: bid + ask
-	t.askPool, t.askPoolSlice, t.askPoolIDSlice = t.sortPool(t.askPool, TradeType_ASK)
+	t.askPool, t.askPoolSlice, t.askPoolIDSlice = t.sortPool(t.askPool, comm.TradeType_ASK)
 	/// debug:
 	TimeDot4 := time.Now().UnixNano()
-	t.bidPool, t.bidPoolSlice, t.bidPoolIDSlice = t.sortPool(t.bidPool, TradeType_BID)
+	t.bidPool, t.bidPoolSlice, t.bidPoolIDSlice = t.sortPool(t.bidPool, comm.TradeType_BID)
 	/// debug:
 	TimeDot5 := time.Now().UnixNano()
 
@@ -1446,17 +1061,17 @@ func (t *TradePool) init() *TradePool {
 	t.latestPrice = float64(0)
 
 	///init Channel
-	t.InChannelBlock = make(chan *Order, INCHANNEL_BUFF_SIZE)
+	t.InChannelBlock = make(chan *comm.Order, INCHANNEL_BUFF_SIZE)
 	t.InChannel = newInPutPool()
-	t.outChannel = newOutPutPool()
-	t.CancelChannel = make(chan *Order, CANCELCHANNEL_BUFF_SIZE)
+	t.MultiChanOut = chs.NewMultiChans_Out(t.multiChanOutProc)
+	t.CancelChannel = make(chan *comm.Order, CANCELCHANNEL_BUFF_SIZE)
 
 	///init Lock
-	t.askPoolRWMutex = NewDebugLock("Init ASK")
-	t.bidPoolRWMutex = NewDebugLock("Init BID")
+	t.askPoolRWMutex = comm.NewDebugLock("Init ASK")
+	t.bidPoolRWMutex = comm.NewDebugLock("Init BID")
 
 	///init DebugInfo
-	t.debug = NewDebugInfo()
+	t.debug = rt.NewDebugInfo()
 
 	fmt.Println(
 		"============================[Market ",
@@ -1485,11 +1100,8 @@ func (t *TradePool) run() {
 	go t.match()
 	go t.cancel()
 	go t.inputBlock()
-	///go t.Output()
-	///go t.input()
 
 	t.InChannel.Start(t)
-	t.outChannel.Start(t)
 
 	fmt.Printf("Start Match Engine %s complete.\n", t.Symbol)
 	t.doctor.SetProgress(doctor.Progress_Working)
@@ -1502,7 +1114,7 @@ func (t *TradePool) setup() *TradePool {
 }
 
 type IEnOrder interface {
-	Add(order_ Order) bool
+	Add(order_ comm.Order) bool
 }
 
 // 二分查找
@@ -1515,17 +1127,17 @@ func binarySearch(m []*list.Element, newPrice float64) (target int, res bool) {
 	mid = 0
 	for left <= right {
 		mid = (left + right) / 2
-		if m[mid].Value.(Order).Price == newPrice {
+		if m[mid].Value.(comm.Order).Price == newPrice {
 			return mid, true
 		}
-		if newPrice < m[mid].Value.(Order).Price {
+		if newPrice < m[mid].Value.(comm.Order).Price {
 			if left == right {
 				return mid - 1, true
 			} else {
 				right = mid - 1
 				target = right
 			}
-		} else if newPrice > m[mid].Value.(Order).Price {
+		} else if newPrice > m[mid].Value.(comm.Order).Price {
 			if left == right {
 				return mid, true
 			} else {
@@ -1543,7 +1155,7 @@ func binarySearchPriceAsc(m []*list.Element, newPrice float64) (target int, res 
 		return -1, true
 	}
 
-	target = sort.Search(len(m), func(i int) bool { return m[i].Value.(Order).Price > newPrice })
+	target = sort.Search(len(m), func(i int) bool { return m[i].Value.(comm.Order).Price > newPrice })
 
 	return target - 1, true
 }
@@ -1553,7 +1165,7 @@ func binarySearchPriceDes(m []*list.Element, newPrice float64) (target int, res 
 		return -1, true
 	}
 
-	target = sort.Search(len(m), func(i int) bool { return m[i].Value.(Order).Price < newPrice })
+	target = sort.Search(len(m), func(i int) bool { return m[i].Value.(comm.Order).Price < newPrice })
 
 	return target - 1, true
 }
@@ -1563,7 +1175,7 @@ func binarySearchOrderIDAsc(m []*list.Element, id int64) (target int, res bool) 
 		return -1, true
 	}
 
-	target = sort.Search(len(m), func(i int) bool { return m[i].Value.(Order).ID > id })
+	target = sort.Search(len(m), func(i int) bool { return m[i].Value.(comm.Order).ID > id })
 
 	return target - 1, true
 }
@@ -1577,12 +1189,12 @@ func binarySearchOrderID(m []*list.Element, id int64) (target int, res bool) {
 	mid = 0
 	for left <= right {
 		mid = (left + right) / 2
-		if m[mid].Value.(Order).ID == id {
+		if m[mid].Value.(comm.Order).ID == id {
 			return mid, true
 		}
-		if id < m[mid].Value.(Order).ID {
+		if id < m[mid].Value.(comm.Order).ID {
 			right = mid - 1
-		} else if id > m[mid].Value.(Order).ID {
+		} else if id > m[mid].Value.(comm.Order).ID {
 			left = mid + 1
 		}
 	}
@@ -1599,7 +1211,7 @@ func binarySearchBidOrderPrice(m []*list.Element, price float64) (target int, re
 	mid = 0
 	for left <= right {
 		mid = (left + right) / 2
-		Price := m[mid].Value.(Order).Price
+		Price := m[mid].Value.(comm.Order).Price
 		if Price == price {
 			return mid, true
 		} else if price < Price {
@@ -1621,7 +1233,7 @@ func binarySearchAskOrderPrice(m []*list.Element, price float64) (target int, re
 	mid = 0
 	for left <= right {
 		mid = (left + right) / 2
-		Price := m[mid].Value.(Order).Price
+		Price := m[mid].Value.(comm.Order).Price
 		if Price == price {
 			return mid, true
 		} else if price < Price {
@@ -1642,19 +1254,19 @@ func binarySearchIDAsc(m []*list.Element, id int64) (target int, res bool) {
 }
 
 //// Sort By Time By timeAdjust
-func timeAdjust(target int, s []*list.Element, elem *Order) int {
+func timeAdjust(target int, s []*list.Element, elem *comm.Order) int {
 	var obj *list.Element
 
 	/// When target != 0
 	for targetT := target; targetT >= 0 && targetT < len(s); targetT-- {
 		obj = s[targetT]
-		if obj.Value.(Order).Price == elem.Price {
-			if obj.Value.(Order).Timestamp <= elem.Timestamp {
+		if obj.Value.(comm.Order).Price == elem.Price {
+			if obj.Value.(comm.Order).Timestamp <= elem.Timestamp {
 				break
 			} else {
 				target--
 				///debug:
-				DebugPrintf(MODULE_NAME, LOG_LEVEL_DEBUG, "Order(Symbol:%s, ID: %d) TimeAdjust- act: set target to %d\n", elem.Symbol, elem.ID, target)
+				comm.DebugPrintf(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_DEBUG, "Order(Symbol:%s, ID: %d) TimeAdjust- act: set target to %d\n", elem.Symbol, elem.ID, target)
 				continue
 			}
 		} else {
@@ -1666,13 +1278,13 @@ func timeAdjust(target int, s []*list.Element, elem *Order) int {
 	/// When target != 0
 	for targetT := target + 1; targetT >= 0 && targetT < len(s); targetT++ {
 		obj = s[targetT]
-		if obj.Value.(Order).Price == elem.Price {
-			if obj.Value.(Order).Timestamp >= elem.Timestamp {
+		if obj.Value.(comm.Order).Price == elem.Price {
+			if obj.Value.(comm.Order).Timestamp >= elem.Timestamp {
 				break
 			} else {
 				target++
 				///debug:
-				DebugPrintf(MODULE_NAME, LOG_LEVEL_DEBUG, "Order(Symbol:%s, ID: %d) TimeAdjust+ act: set target to %d\n", elem.Symbol, elem.ID, target)
+				comm.DebugPrintf(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_DEBUG, "Order(Symbol:%s, ID: %d) TimeAdjust+ act: set target to %d\n", elem.Symbol, elem.ID, target)
 				continue
 			}
 		} else {
@@ -1683,9 +1295,9 @@ func timeAdjust(target int, s []*list.Element, elem *Order) int {
 	return target
 }
 
-func (t *TradePool) addToAskPool(order_ *Order) (*list.Element, bool) {
+func (t *TradePool) addToAskPool(order_ *comm.Order) (*list.Element, bool) {
 
-	if order_.AorB != TradeType_ASK {
+	if order_.AorB != comm.TradeType_ASK {
 		return nil, false
 	}
 
@@ -1726,9 +1338,9 @@ func (t *TradePool) addToAskPool(order_ *Order) (*list.Element, bool) {
 	return elem, true
 }
 
-func (t *TradePool) addToBidPool(order_ *Order) (*list.Element, bool) {
+func (t *TradePool) addToBidPool(order_ *comm.Order) (*list.Element, bool) {
 
-	if order_.AorB != TradeType_BID {
+	if order_.AorB != comm.TradeType_BID {
 		return nil, false
 	}
 
@@ -1770,7 +1382,7 @@ func (t *TradePool) addToBidPool(order_ *Order) (*list.Element, bool) {
 
 func (t *TradePool) addToIdSlice(elem *list.Element, slice []*list.Element) ([]*list.Element, bool) {
 
-	targetID, suc := binarySearchOrderIDAsc(slice, elem.Value.(Order).ID)
+	targetID, suc := binarySearchOrderIDAsc(slice, elem.Value.(comm.Order).ID)
 
 	if suc {
 		s := []*list.Element{}
@@ -1792,7 +1404,7 @@ func (t *TradePool) addToIdSlice(elem *list.Element, slice []*list.Element) ([]*
 }
 
 func (t *TradePool) removeFromIdSlice(elem *list.Element, slice []*list.Element) ([]*list.Element, bool) {
-	targetID, suc := binarySearchOrderID(slice, elem.Value.(Order).ID)
+	targetID, suc := binarySearchOrderID(slice, elem.Value.(comm.Order).ID)
 	if suc {
 		s := []*list.Element{}
 		if targetID == 0 {
@@ -1807,9 +1419,9 @@ func (t *TradePool) removeFromIdSlice(elem *list.Element, slice []*list.Element)
 	return nil, false
 }
 
-func (t *TradePool) insertBefore(order_ *Order, target int) *list.Element {
+func (t *TradePool) insertBefore(order_ *comm.Order, target int) *list.Element {
 	var elem *list.Element = nil
-	if order_.AorB == TradeType_ASK {
+	if order_.AorB == comm.TradeType_ASK {
 		if target == 0 {
 			elem = t.askPool.PushFront(*order_)
 
@@ -1830,7 +1442,7 @@ func (t *TradePool) insertBefore(order_ *Order, target int) *list.Element {
 			askPoolSlice = append(askPoolSlice, t.askPoolSlice[target:]...)
 			t.askPoolSlice = askPoolSlice
 		}
-	} else if order_.AorB == TradeType_BID {
+	} else if order_.AorB == comm.TradeType_BID {
 		if target == 0 {
 			elem = t.bidPool.PushFront(*order_)
 
@@ -1858,20 +1470,20 @@ func (t *TradePool) insertBefore(order_ *Order, target int) *list.Element {
 }
 
 ///quick add is used to insert order while partly trade, the precondition is the pool is sorted
-func (t *TradePool) addQuickToAskPool(order_ *Order) *list.Element {
+func (t *TradePool) addQuickToAskPool(order_ *comm.Order) *list.Element {
 
 	var target int = 0
 	var elem, e *list.Element
-	if order_.AorB != TradeType_ASK {
+	if order_.AorB != comm.TradeType_ASK {
 		return nil
 	}
 
 	for _, e = range t.askPoolSlice {
-		if order_.Price < e.Value.(Order).Price {
+		if order_.Price < e.Value.(comm.Order).Price {
 			elem = t.insertBefore(order_, target)
 			break
-		} else if order_.Price == e.Value.(Order).Price {
-			if order_.Timestamp <= e.Value.(Order).Timestamp {
+		} else if order_.Price == e.Value.(comm.Order).Price {
+			if order_.Timestamp <= e.Value.(comm.Order).Timestamp {
 				elem = t.insertBefore(order_, target)
 				break
 			} else {
@@ -1899,20 +1511,20 @@ func (t *TradePool) addQuickToAskPool(order_ *Order) *list.Element {
 }
 
 ///quick add is used to insert order while partly trade, the precondition is the pool is sorted
-func (t *TradePool) addQuickToBidPool(order_ *Order) *list.Element {
+func (t *TradePool) addQuickToBidPool(order_ *comm.Order) *list.Element {
 
 	var target int = 0
 	var elem, e *list.Element
-	if order_.AorB != TradeType_BID {
+	if order_.AorB != comm.TradeType_BID {
 		return nil
 	}
 
 	for _, e = range t.bidPoolSlice {
-		if order_.Price > e.Value.(Order).Price {
+		if order_.Price > e.Value.(comm.Order).Price {
 			elem = t.insertBefore(order_, target)
 			break
-		} else if order_.Price == e.Value.(Order).Price {
-			if order_.Timestamp <= e.Value.(Order).Timestamp {
+		} else if order_.Price == e.Value.(comm.Order).Price {
+			if order_.Timestamp <= e.Value.(comm.Order).Timestamp {
 				elem = t.insertBefore(order_, target)
 				break
 			} else {
@@ -1939,14 +1551,14 @@ func (t *TradePool) addQuickToBidPool(order_ *Order) *list.Element {
 	return elem
 }
 
-func (t *TradePool) add(order_ *Order) (*list.Element, bool) {
-	DebugPrintf(MODULE_NAME, LOG_LEVEL_TRACK, "%s-%s TradePool Add Order ID(%d), Time(%d)\n", t.Symbol, t.MarketType.String(), order_.ID, order_.Timestamp)
+func (t *TradePool) add(order_ *comm.Order) (*list.Element, bool) {
+	comm.DebugPrintf(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_TRACK, "%s-%s TradePool Add Order ID(%d), Time(%d)\n", t.Symbol, t.MarketType.String(), order_.ID, order_.Timestamp)
 	if order_.Symbol != t.Symbol {
 		fmt.Printf("%s Add illegal order with symbol(%s) to %s-%s Match Engine", t.Symbol, order_.Symbol, t.Symbol, t.MarketType.String())
 		return nil, false
 	}
 
-	if order_.AorB == TradeType_ASK {
+	if order_.AorB == comm.TradeType_ASK {
 		t.askPoolRWMutex.Lock("Add ASK")
 		defer t.askPoolRWMutex.Unlock("Add ASK")
 
@@ -1961,7 +1573,7 @@ func (t *TradePool) add(order_ *Order) (*list.Element, bool) {
 
 		/// debug:
 		TimeDot2 := time.Now().UnixNano()
-		DebugPrintln(MODULE_NAME, LOG_LEVEL_DEBUG, "-",
+		comm.DebugPrintln(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_DEBUG, "-",
 			t.Symbol, t.MarketType.String(),
 			" TradePool Add ask order==",
 			"id: ", order_.ID,
@@ -1974,7 +1586,7 @@ func (t *TradePool) add(order_ *Order) (*list.Element, bool) {
 			"\n",
 		)
 		return elem, true
-	} else if order_.AorB == TradeType_BID {
+	} else if order_.AorB == comm.TradeType_BID {
 		t.bidPoolRWMutex.Lock("Add BID")
 		defer t.bidPoolRWMutex.Unlock("Add BID")
 
@@ -1989,7 +1601,7 @@ func (t *TradePool) add(order_ *Order) (*list.Element, bool) {
 
 		/// debug:
 		TimeDot2 := time.Now().UnixNano()
-		DebugPrintln(MODULE_NAME, LOG_LEVEL_DEBUG, "-",
+		comm.DebugPrintln(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_DEBUG, "-",
 			t.Symbol, t.MarketType.String(),
 			" TradePool Add bid order==",
 			"id: ", order_.ID,
@@ -2008,14 +1620,14 @@ func (t *TradePool) add(order_ *Order) (*list.Element, bool) {
 }
 
 ///quick add is used to insert order while partly trade, the precondition is the pool is sorted
-func (t *TradePool) addQuick(order_ *Order) (*list.Element, bool) {
-	DebugPrintf(MODULE_NAME, LOG_LEVEL_TRACK, "%s TradePool addQuick Order ID(%d), Time(%d)\n", t.Symbol, order_.ID, order_.Timestamp)
+func (t *TradePool) addQuick(order_ *comm.Order) (*list.Element, bool) {
+	comm.DebugPrintf(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_TRACK, "%s TradePool addQuick Order ID(%d), Time(%d)\n", t.Symbol, order_.ID, order_.Timestamp)
 	if order_ == nil {
 		return nil, false
 	}
 
 	var elem *list.Element = nil
-	if order_.AorB == TradeType_ASK {
+	if order_.AorB == comm.TradeType_ASK {
 		t.askPoolRWMutex.Lock("addQuick ASK")
 		defer t.askPoolRWMutex.Unlock("addQuick ASK")
 
@@ -2030,7 +1642,7 @@ func (t *TradePool) addQuick(order_ *Order) (*list.Element, bool) {
 
 		/// debug:
 		TimeDot2 := time.Now().UnixNano()
-		DebugPrintln(MODULE_NAME, LOG_LEVEL_DEBUG, "-",
+		comm.DebugPrintln(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_DEBUG, "-",
 			t.Symbol, t.MarketType.String(),
 			" TradePool Quick add ask order==",
 			"id: ", order_.ID,
@@ -2042,7 +1654,7 @@ func (t *TradePool) addQuick(order_ *Order) (*list.Element, bool) {
 			"****USE_TIME: ", float64(TimeDot2-TimeDot1)/float64(1*time.Second),
 			"\n",
 		)
-	} else if order_.AorB == TradeType_BID {
+	} else if order_.AorB == comm.TradeType_BID {
 		t.bidPoolRWMutex.Lock("addQuick BID")
 		defer t.bidPoolRWMutex.Unlock("addQuick BID")
 
@@ -2057,7 +1669,7 @@ func (t *TradePool) addQuick(order_ *Order) (*list.Element, bool) {
 
 		/// debug:
 		TimeDot2 := time.Now().UnixNano()
-		DebugPrintln(MODULE_NAME, LOG_LEVEL_DEBUG, "-",
+		comm.DebugPrintln(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_DEBUG, "-",
 			t.Symbol, t.MarketType.String(),
 			" TradePool Quick add bid order==",
 			"id: ", order_.ID,
@@ -2075,14 +1687,14 @@ func (t *TradePool) addQuick(order_ *Order) (*list.Element, bool) {
 }
 
 type ITrade interface {
-	GetTop(type_ string) (order_ Order, res bool)
-	PopTop(type_ string) (order_ []Order, num uint)
+	GetTop(type_ string) (order_ comm.Order, res bool)
+	PopTop(type_ string) (order_ []comm.Order, num uint)
 	Trade()
 }
 
-func (t *TradePool) getTop(type_ TradeType) (order_ *Order, res bool) {
+func (t *TradePool) getTop(type_ comm.TradeType) (order_ *comm.Order, res bool) {
 
-	if type_ == TradeType_BID {
+	if type_ == comm.TradeType_BID {
 		t.bidPoolRWMutex.RLock("GetTop BID")
 		defer t.bidPoolRWMutex.RUnlock("GetTop BID")
 
@@ -2091,9 +1703,9 @@ func (t *TradePool) getTop(type_ TradeType) (order_ *Order, res bool) {
 		}
 
 		/// do business:
-		order := t.bidPool.Front().Value.(Order)
+		order := t.bidPool.Front().Value.(comm.Order)
 		return &order, true
-	} else if type_ == TradeType_ASK {
+	} else if type_ == comm.TradeType_ASK {
 		t.askPoolRWMutex.RLock("GetTop ASK")
 		defer t.askPoolRWMutex.RUnlock("GetTop ASK")
 
@@ -2102,15 +1714,15 @@ func (t *TradePool) getTop(type_ TradeType) (order_ *Order, res bool) {
 		}
 
 		/// do business:
-		order := t.askPool.Front().Value.(Order)
+		order := t.askPool.Front().Value.(comm.Order)
 		return &order, true
 	} else {
 		return nil, false
 	}
 }
 
-func (t *TradePool) popTops(type_ TradeType) (order_ []Order, num uint) {
-	if type_ == TradeType_BID {
+func (t *TradePool) popTops(type_ comm.TradeType) (order_ []comm.Order, num uint) {
+	if type_ == comm.TradeType_BID {
 		t.bidPoolRWMutex.Lock("PopTops BID")
 		defer t.bidPoolRWMutex.Unlock("PopTops BID")
 
@@ -2120,11 +1732,11 @@ func (t *TradePool) popTops(type_ TradeType) (order_ []Order, num uint) {
 
 		/// do business:
 		var tmp *list.Element
-		var out []Order
+		var out []comm.Order
 		top := t.bidPool.Front()
-		price := top.Value.(Order).Price
-		for num = 0; top.Value.(Order).Price == price; {
-			out = append(out, top.Value.(Order))
+		price := top.Value.(comm.Order).Price
+		for num = 0; top.Value.(comm.Order).Price == price; {
+			out = append(out, top.Value.(comm.Order))
 			tmp = top
 			top = top.Next()
 
@@ -2140,7 +1752,7 @@ func (t *TradePool) popTops(type_ TradeType) (order_ []Order, num uint) {
 		}
 
 		return out, num
-	} else if type_ == TradeType_ASK {
+	} else if type_ == comm.TradeType_ASK {
 		t.askPoolRWMutex.Lock("PopTops ASK")
 		defer t.askPoolRWMutex.Unlock("PopTops ASK")
 
@@ -2150,11 +1762,11 @@ func (t *TradePool) popTops(type_ TradeType) (order_ []Order, num uint) {
 
 		/// do business:
 		var tmp *list.Element
-		var out []Order
+		var out []comm.Order
 		top := t.askPool.Front()
-		price := top.Value.(Order).Price
-		for num = 0; top.Value.(Order).Price == price; {
-			out = append(out, top.Value.(Order))
+		price := top.Value.(comm.Order).Price
+		for num = 0; top.Value.(comm.Order).Price == price; {
+			out = append(out, top.Value.(comm.Order))
 			tmp = top
 			top = top.Next()
 
@@ -2175,8 +1787,8 @@ func (t *TradePool) popTops(type_ TradeType) (order_ []Order, num uint) {
 	}
 }
 
-func (t *TradePool) popTop(type_ TradeType) (order_ *Order, res bool) {
-	if type_ == TradeType_BID {
+func (t *TradePool) popTop(type_ comm.TradeType) (order_ *comm.Order, res bool) {
+	if type_ == comm.TradeType_BID {
 		t.bidPoolRWMutex.Lock("PopTop BID")
 		defer t.bidPoolRWMutex.Unlock("PopTop BID")
 
@@ -2187,7 +1799,7 @@ func (t *TradePool) popTop(type_ TradeType) (order_ *Order, res bool) {
 
 		/// do business:
 		top := t.bidPool.Front()
-		order := top.Value.(Order)
+		order := top.Value.(comm.Order)
 
 		///remove from index and pool
 		t.bidPoolSlice = t.bidPoolSlice[1:]
@@ -2198,7 +1810,7 @@ func (t *TradePool) popTop(type_ TradeType) (order_ *Order, res bool) {
 		t.bidPool.Remove(top)
 
 		return &order, true
-	} else if type_ == TradeType_ASK {
+	} else if type_ == comm.TradeType_ASK {
 		t.askPoolRWMutex.Lock("PopTop ASK")
 		defer t.askPoolRWMutex.Unlock("PopTop ASK")
 
@@ -2209,7 +1821,7 @@ func (t *TradePool) popTop(type_ TradeType) (order_ *Order, res bool) {
 
 		/// do business:
 		top := t.askPool.Front()
-		order := top.Value.(Order)
+		order := top.Value.(comm.Order)
 
 		///remove from index and pool
 		t.askPoolSlice = t.askPoolSlice[1:]
@@ -2238,7 +1850,7 @@ func removeFromSlice(target int, slice []*list.Element) []*list.Element {
 }
 
 /// should be protect by PoolRWMutex.RLock()
-func (t *TradePool) orderCheck(order *Order) (target int, res bool) {
+func (t *TradePool) orderCheck(order *comm.Order) (target int, res bool) {
 	if order == nil {
 		return -1, false
 	}
@@ -2249,12 +1861,12 @@ func (t *TradePool) orderCheck(order *Order) (target int, res bool) {
 		suc      bool          = false
 		elem     *list.Element = nil
 	)
-	if order.AorB == TradeType_BID {
+	if order.AorB == comm.TradeType_BID {
 		targetID, suc = binarySearchOrderID(t.bidPoolIDSlice, order.ID)
 		if suc {
 			elem = t.bidPoolIDSlice[targetID]
 		}
-	} else if order.AorB == TradeType_ASK {
+	} else if order.AorB == comm.TradeType_ASK {
 		targetID, suc = binarySearchOrderID(t.askPoolIDSlice, order.ID)
 		if suc {
 			elem = t.askPoolIDSlice[targetID]
@@ -2265,17 +1877,17 @@ func (t *TradePool) orderCheck(order *Order) (target int, res bool) {
 	}
 
 	if suc {
-		if elem.Value.(Order).Who == order.Who &&
-			elem.Value.(Order).Price == order.Price &&
-			///elem.Value.(Order).Timestamp == order.Timestamp {
-			elem.Value.(Order).EnOrderPrice == order.EnOrderPrice &&
-			elem.Value.(Order).TotalVolume == order.TotalVolume {
+		if elem.Value.(comm.Order).Who == order.Who &&
+			elem.Value.(comm.Order).Price == order.Price &&
+			///elem.Value.(comm.Order).Timestamp == order.Timestamp {
+			elem.Value.(comm.Order).EnOrderPrice == order.EnOrderPrice &&
+			elem.Value.(comm.Order).TotalVolume == order.TotalVolume {
 			return targetID, true
 		} else {
 			return targetID, false
 		}
 	} else {
-		DebugPrintln(MODULE_NAME, LOG_LEVEL_TRACK, "OrderCheck in ME trade pool fail! Not a trading order.\n")
+		comm.DebugPrintln(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_TRACK, "OrderCheck in ME trade pool fail! Not a trading order.\n")
 		return -1, false
 	}
 }
@@ -2293,40 +1905,40 @@ func (t *TradePool) rmBidOrderByTarget(target int) bool {
 	t.bidPoolIDSlice = removeFromSlice(target, t.bidPoolIDSlice)
 
 	/// remove from bidPoolSlice
-	targetP, sucP := binarySearchBidOrderPrice(t.bidPoolSlice, obj.Value.(Order).Price)
+	targetP, sucP := binarySearchBidOrderPrice(t.bidPoolSlice, obj.Value.(comm.Order).Price)
 	if sucP {
 		var objP *list.Element
 		for targetP >= 0 && targetP < len(t.bidPoolSlice) {
 			objP = t.bidPoolSlice[targetP]
 			var operDirection int = 0
-			if objP.Value.(Order).Price == obj.Value.(Order).Price {
-				if objP.Value.(Order).Timestamp < obj.Value.(Order).Timestamp {
+			if objP.Value.(comm.Order).Price == obj.Value.(comm.Order).Price {
+				if objP.Value.(comm.Order).Timestamp < obj.Value.(comm.Order).Timestamp {
 					targetP++
 					operDirection = 1
 					///debug:
-					if objP.Value.(Order).Price != obj.Value.(Order).Price {
-						DebugPrintf(MODULE_NAME, LOG_LEVEL_FATAL, "%s-%s RmBidOrderByTarget+ occur exception when at bidPoolSlice search Target(ID:%d,Price:%f,Time:%d), SearchedObj(ID:%d,Price:%f,Time:%d)\n",
+					if objP.Value.(comm.Order).Price != obj.Value.(comm.Order).Price {
+						comm.DebugPrintf(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_FATAL, "%s-%s RmBidOrderByTarget+ occur exception when at bidPoolSlice search Target(ID:%d,Price:%f,Time:%d), SearchedObj(ID:%d,Price:%f,Time:%d)\n",
 							t.Symbol, t.MarketType.String(),
-							obj.Value.(Order).ID,
-							obj.Value.(Order).Price,
-							obj.Value.(Order).Timestamp,
-							objP.Value.(Order).ID,
-							objP.Value.(Order).Price,
-							objP.Value.(Order).Timestamp,
+							obj.Value.(comm.Order).ID,
+							obj.Value.(comm.Order).Price,
+							obj.Value.(comm.Order).Timestamp,
+							objP.Value.(comm.Order).ID,
+							objP.Value.(comm.Order).Price,
+							objP.Value.(comm.Order).Timestamp,
 						)
 						t.dump()
 						panic(fmt.Errorf("Core Algorithm Bug!"))
 					}
 					///debug:
-					if targetP < len(t.askPoolSlice) && t.bidPoolSlice[targetP].Value.(Order).Timestamp > obj.Value.(Order).Timestamp {
-						DebugPrintf(MODULE_NAME, LOG_LEVEL_FATAL, "%s-%s RmBidOrderByTarget+ occur Pingpong exception: Target(ID:%d,Price:%f,Time:%d), TargetP(ID:%d,Price:%f,Time:%d), TargetP=%d\n",
+					if targetP < len(t.askPoolSlice) && t.bidPoolSlice[targetP].Value.(comm.Order).Timestamp > obj.Value.(comm.Order).Timestamp {
+						comm.DebugPrintf(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_FATAL, "%s-%s RmBidOrderByTarget+ occur Pingpong exception: Target(ID:%d,Price:%f,Time:%d), TargetP(ID:%d,Price:%f,Time:%d), TargetP=%d\n",
 							t.Symbol, t.MarketType.String(),
-							obj.Value.(Order).ID,
-							obj.Value.(Order).Price,
-							obj.Value.(Order).Timestamp,
-							objP.Value.(Order).ID,
-							objP.Value.(Order).Price,
-							objP.Value.(Order).Timestamp,
+							obj.Value.(comm.Order).ID,
+							obj.Value.(comm.Order).Price,
+							obj.Value.(comm.Order).Timestamp,
+							objP.Value.(comm.Order).ID,
+							objP.Value.(comm.Order).Price,
+							objP.Value.(comm.Order).Timestamp,
 							targetP,
 						)
 						t.dump()
@@ -2334,33 +1946,33 @@ func (t *TradePool) rmBidOrderByTarget(target int) bool {
 					}
 
 					continue
-				} else if objP.Value.(Order).Timestamp > obj.Value.(Order).Timestamp {
+				} else if objP.Value.(comm.Order).Timestamp > obj.Value.(comm.Order).Timestamp {
 					targetP--
 					operDirection = -1
 					///debug:
-					if objP.Value.(Order).Price != obj.Value.(Order).Price {
-						DebugPrintf(MODULE_NAME, LOG_LEVEL_FATAL, "%s-%s RmBidOrderByTarget- occur exception when at bidPoolSlice search Target(ID:%d,Price:%f,Time:%d), SearchedObj(ID:%d,Price:%f,Time:%d)\n",
+					if objP.Value.(comm.Order).Price != obj.Value.(comm.Order).Price {
+						comm.DebugPrintf(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_FATAL, "%s-%s RmBidOrderByTarget- occur exception when at bidPoolSlice search Target(ID:%d,Price:%f,Time:%d), SearchedObj(ID:%d,Price:%f,Time:%d)\n",
 							t.Symbol, t.MarketType.String(),
-							obj.Value.(Order).ID,
-							obj.Value.(Order).Price,
-							obj.Value.(Order).Timestamp,
-							objP.Value.(Order).ID,
-							objP.Value.(Order).Price,
-							objP.Value.(Order).Timestamp,
+							obj.Value.(comm.Order).ID,
+							obj.Value.(comm.Order).Price,
+							obj.Value.(comm.Order).Timestamp,
+							objP.Value.(comm.Order).ID,
+							objP.Value.(comm.Order).Price,
+							objP.Value.(comm.Order).Timestamp,
 						)
 						t.dump()
 						panic(fmt.Errorf("Core Algorithm Bug!"))
 					}
 					///debug:
-					if targetP >= 0 && t.bidPoolSlice[targetP].Value.(Order).Timestamp < obj.Value.(Order).Timestamp {
-						DebugPrintf(MODULE_NAME, LOG_LEVEL_FATAL, "%s-%s RmBidOrderByTarget- occur Pingpong exception: Target(ID:%d,Price:%f,Time:%d), TargetP(ID:%d,Price:%f,Time:%d), TargetP=%d\n",
+					if targetP >= 0 && t.bidPoolSlice[targetP].Value.(comm.Order).Timestamp < obj.Value.(comm.Order).Timestamp {
+						comm.DebugPrintf(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_FATAL, "%s-%s RmBidOrderByTarget- occur Pingpong exception: Target(ID:%d,Price:%f,Time:%d), TargetP(ID:%d,Price:%f,Time:%d), TargetP=%d\n",
 							t.Symbol, t.MarketType.String(),
-							obj.Value.(Order).ID,
-							obj.Value.(Order).Price,
-							obj.Value.(Order).Timestamp,
-							objP.Value.(Order).ID,
-							objP.Value.(Order).Price,
-							objP.Value.(Order).Timestamp,
+							obj.Value.(comm.Order).ID,
+							obj.Value.(comm.Order).Price,
+							obj.Value.(comm.Order).Timestamp,
+							objP.Value.(comm.Order).ID,
+							objP.Value.(comm.Order).Price,
+							objP.Value.(comm.Order).Timestamp,
 							targetP,
 						)
 						t.dump()
@@ -2369,15 +1981,15 @@ func (t *TradePool) rmBidOrderByTarget(target int) bool {
 
 					continue
 				} else {
-					if objP.Value.(Order).ID == obj.Value.(Order).ID {
+					if objP.Value.(comm.Order).ID == obj.Value.(comm.Order).ID {
 						break
 					} else {
 						bFind := false
 						if operDirection != 0 {
 							for targetP = targetP + operDirection; targetP >= 0 && targetP < len(t.bidPoolSlice); targetP = targetP + operDirection {
 								objP = t.bidPoolSlice[targetP]
-								if (objP.Value.(Order).Price == obj.Value.(Order).Price) && (objP.Value.(Order).Timestamp == obj.Value.(Order).Timestamp) {
-									if objP.Value.(Order).ID == obj.Value.(Order).ID {
+								if (objP.Value.(comm.Order).Price == obj.Value.(comm.Order).Price) && (objP.Value.(comm.Order).Timestamp == obj.Value.(comm.Order).Timestamp) {
+									if objP.Value.(comm.Order).ID == obj.Value.(comm.Order).ID {
 										bFind = true
 										break
 									}
@@ -2390,8 +2002,8 @@ func (t *TradePool) rmBidOrderByTarget(target int) bool {
 							operDirection = 1
 							for targetP = targetP + operDirection; targetP >= 0 && targetP < len(t.bidPoolSlice); targetP = targetP + operDirection {
 								objP = t.bidPoolSlice[targetP]
-								if (objP.Value.(Order).Price == obj.Value.(Order).Price) && (objP.Value.(Order).Timestamp == obj.Value.(Order).Timestamp) {
-									if objP.Value.(Order).ID == obj.Value.(Order).ID {
+								if (objP.Value.(comm.Order).Price == obj.Value.(comm.Order).Price) && (objP.Value.(comm.Order).Timestamp == obj.Value.(comm.Order).Timestamp) {
+									if objP.Value.(comm.Order).ID == obj.Value.(comm.Order).ID {
 										bFind = true
 										break
 									}
@@ -2406,8 +2018,8 @@ func (t *TradePool) rmBidOrderByTarget(target int) bool {
 							operDirection = -1
 							for targetP = targetP + operDirection; targetP >= 0 && targetP < len(t.bidPoolSlice); targetP = targetP + operDirection {
 								objP = t.bidPoolSlice[targetP]
-								if (objP.Value.(Order).Price == obj.Value.(Order).Price) && (objP.Value.(Order).Timestamp == obj.Value.(Order).Timestamp) {
-									if objP.Value.(Order).ID == obj.Value.(Order).ID {
+								if (objP.Value.(comm.Order).Price == obj.Value.(comm.Order).Price) && (objP.Value.(comm.Order).Timestamp == obj.Value.(comm.Order).Timestamp) {
+									if objP.Value.(comm.Order).ID == obj.Value.(comm.Order).ID {
 										bFind = true
 										break
 									}
@@ -2431,7 +2043,7 @@ func (t *TradePool) rmBidOrderByTarget(target int) bool {
 			t.bidPoolSlice = removeFromSlice(targetP, t.bidPoolSlice)
 		} else {
 			t.dump()
-			panic(fmt.Errorf("%s-%s RmBidOrderByTarget order id(%d) not found at bidPoolSlice", t.Symbol, t.MarketType.String(), obj.Value.(Order).ID))
+			panic(fmt.Errorf("%s-%s RmBidOrderByTarget order id(%d) not found at bidPoolSlice", t.Symbol, t.MarketType.String(), obj.Value.(comm.Order).ID))
 		}
 	} else {
 		panic(fmt.Errorf("%s-%s RmBidOrderByTarget remove order from bidPoolSlice fail! data in bidPoolSlice and bidPoolIDSlice not sync!", t.Symbol, t.MarketType.String()))
@@ -2474,40 +2086,40 @@ func (t *TradePool) rmAskOrderByTarget(target int) bool {
 	t.askPoolIDSlice = removeFromSlice(target, t.askPoolIDSlice)
 
 	/// remove from askPoolSlice
-	targetP, sucP := binarySearchAskOrderPrice(t.askPoolSlice, obj.Value.(Order).Price)
+	targetP, sucP := binarySearchAskOrderPrice(t.askPoolSlice, obj.Value.(comm.Order).Price)
 	if sucP {
 		var objP *list.Element
 		for targetP >= 0 && targetP < len(t.askPoolSlice) {
 			objP = t.askPoolSlice[targetP]
 			var operDirection int = 0
-			if objP.Value.(Order).Price == obj.Value.(Order).Price {
-				if objP.Value.(Order).Timestamp < obj.Value.(Order).Timestamp {
+			if objP.Value.(comm.Order).Price == obj.Value.(comm.Order).Price {
+				if objP.Value.(comm.Order).Timestamp < obj.Value.(comm.Order).Timestamp {
 					targetP++
 					operDirection = 1
 					///debug:
-					if objP.Value.(Order).Price != obj.Value.(Order).Price {
-						DebugPrintf(MODULE_NAME, LOG_LEVEL_FATAL, "%s-%s RmAskOrderByTarget+ occur exception when at askPoolSlice search Target(ID:%d,Price:%f,Time:%d), SearchedObj(ID:%d,Price:%f,Time:%d)\n",
+					if objP.Value.(comm.Order).Price != obj.Value.(comm.Order).Price {
+						comm.DebugPrintf(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_FATAL, "%s-%s RmAskOrderByTarget+ occur exception when at askPoolSlice search Target(ID:%d,Price:%f,Time:%d), SearchedObj(ID:%d,Price:%f,Time:%d)\n",
 							t.Symbol, t.MarketType.String(),
-							obj.Value.(Order).ID,
-							obj.Value.(Order).Price,
-							obj.Value.(Order).Timestamp,
-							objP.Value.(Order).ID,
-							objP.Value.(Order).Price,
-							objP.Value.(Order).Timestamp,
+							obj.Value.(comm.Order).ID,
+							obj.Value.(comm.Order).Price,
+							obj.Value.(comm.Order).Timestamp,
+							objP.Value.(comm.Order).ID,
+							objP.Value.(comm.Order).Price,
+							objP.Value.(comm.Order).Timestamp,
 						)
 						t.dump()
 						panic(fmt.Errorf("Core Algorithm Bug!"))
 					}
 					///debug:
-					if targetP < len(t.askPoolSlice) && t.askPoolSlice[targetP].Value.(Order).Timestamp > obj.Value.(Order).Timestamp {
-						DebugPrintf(MODULE_NAME, LOG_LEVEL_FATAL, "%s-%s RmAskOrderByTarget+ occur Pingpong exception: Target(ID:%d,Price:%f,Time:%d), TargetP(ID:%d,Price:%f,Time:%d), TargetP=%d\n",
+					if targetP < len(t.askPoolSlice) && t.askPoolSlice[targetP].Value.(comm.Order).Timestamp > obj.Value.(comm.Order).Timestamp {
+						comm.DebugPrintf(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_FATAL, "%s-%s RmAskOrderByTarget+ occur Pingpong exception: Target(ID:%d,Price:%f,Time:%d), TargetP(ID:%d,Price:%f,Time:%d), TargetP=%d\n",
 							t.Symbol, t.MarketType.String(),
-							obj.Value.(Order).ID,
-							obj.Value.(Order).Price,
-							obj.Value.(Order).Timestamp,
-							objP.Value.(Order).ID,
-							objP.Value.(Order).Price,
-							objP.Value.(Order).Timestamp,
+							obj.Value.(comm.Order).ID,
+							obj.Value.(comm.Order).Price,
+							obj.Value.(comm.Order).Timestamp,
+							objP.Value.(comm.Order).ID,
+							objP.Value.(comm.Order).Price,
+							objP.Value.(comm.Order).Timestamp,
 							targetP,
 						)
 						t.dump()
@@ -2515,33 +2127,33 @@ func (t *TradePool) rmAskOrderByTarget(target int) bool {
 					}
 
 					continue
-				} else if objP.Value.(Order).Timestamp > obj.Value.(Order).Timestamp {
+				} else if objP.Value.(comm.Order).Timestamp > obj.Value.(comm.Order).Timestamp {
 					targetP--
 					operDirection = -1
 					///debug:
-					if objP.Value.(Order).Price != obj.Value.(Order).Price {
-						DebugPrintf(MODULE_NAME, LOG_LEVEL_FATAL, "%s-%s RmAskOrderByTarget- occur exception when at askPoolSlice search Target(ID:%d,Price:%f,Time:%d), SearchedObj(ID:%d,Price:%f,Time:%d)\n",
+					if objP.Value.(comm.Order).Price != obj.Value.(comm.Order).Price {
+						comm.DebugPrintf(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_FATAL, "%s-%s RmAskOrderByTarget- occur exception when at askPoolSlice search Target(ID:%d,Price:%f,Time:%d), SearchedObj(ID:%d,Price:%f,Time:%d)\n",
 							t.Symbol, t.MarketType.String(),
-							obj.Value.(Order).ID,
-							obj.Value.(Order).Price,
-							obj.Value.(Order).Timestamp,
-							objP.Value.(Order).ID,
-							objP.Value.(Order).Price,
-							objP.Value.(Order).Timestamp,
+							obj.Value.(comm.Order).ID,
+							obj.Value.(comm.Order).Price,
+							obj.Value.(comm.Order).Timestamp,
+							objP.Value.(comm.Order).ID,
+							objP.Value.(comm.Order).Price,
+							objP.Value.(comm.Order).Timestamp,
 						)
 						t.dump()
 						panic(fmt.Errorf("Core Algorithm Bug!"))
 					}
 					///debug:
-					if targetP >= 0 && t.askPoolSlice[targetP].Value.(Order).Timestamp < obj.Value.(Order).Timestamp {
-						DebugPrintf(MODULE_NAME, LOG_LEVEL_FATAL, "%s-%s RmAskOrderByTarget- occur Pingpong exception: Target(ID:%d,Price:%f,Time:%d), TargetP(ID:%d,Price:%f,Time:%d), TargetP=%d\n",
+					if targetP >= 0 && t.askPoolSlice[targetP].Value.(comm.Order).Timestamp < obj.Value.(comm.Order).Timestamp {
+						comm.DebugPrintf(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_FATAL, "%s-%s RmAskOrderByTarget- occur Pingpong exception: Target(ID:%d,Price:%f,Time:%d), TargetP(ID:%d,Price:%f,Time:%d), TargetP=%d\n",
 							t.Symbol, t.MarketType.String(),
-							obj.Value.(Order).ID,
-							obj.Value.(Order).Price,
-							obj.Value.(Order).Timestamp,
-							objP.Value.(Order).ID,
-							objP.Value.(Order).Price,
-							objP.Value.(Order).Timestamp,
+							obj.Value.(comm.Order).ID,
+							obj.Value.(comm.Order).Price,
+							obj.Value.(comm.Order).Timestamp,
+							objP.Value.(comm.Order).ID,
+							objP.Value.(comm.Order).Price,
+							objP.Value.(comm.Order).Timestamp,
 							targetP,
 						)
 						t.dump()
@@ -2550,15 +2162,15 @@ func (t *TradePool) rmAskOrderByTarget(target int) bool {
 
 					continue
 				} else {
-					if objP.Value.(Order).ID == obj.Value.(Order).ID {
+					if objP.Value.(comm.Order).ID == obj.Value.(comm.Order).ID {
 						break
 					} else {
 						bFind := false
 						if operDirection != 0 {
 							for targetP = targetP + operDirection; targetP >= 0 && targetP < len(t.askPoolSlice); targetP = targetP + operDirection {
 								objP = t.askPoolSlice[targetP]
-								if (objP.Value.(Order).Price == obj.Value.(Order).Price) && (objP.Value.(Order).Timestamp == obj.Value.(Order).Timestamp) {
-									if objP.Value.(Order).ID == obj.Value.(Order).ID {
+								if (objP.Value.(comm.Order).Price == obj.Value.(comm.Order).Price) && (objP.Value.(comm.Order).Timestamp == obj.Value.(comm.Order).Timestamp) {
+									if objP.Value.(comm.Order).ID == obj.Value.(comm.Order).ID {
 										bFind = true
 										break
 									}
@@ -2571,8 +2183,8 @@ func (t *TradePool) rmAskOrderByTarget(target int) bool {
 							operDirection = 1
 							for targetP = targetP + operDirection; targetP >= 0 && targetP < len(t.askPoolSlice); targetP = targetP + operDirection {
 								objP = t.askPoolSlice[targetP]
-								if (objP.Value.(Order).Price == obj.Value.(Order).Price) && (objP.Value.(Order).Timestamp == obj.Value.(Order).Timestamp) {
-									if objP.Value.(Order).ID == obj.Value.(Order).ID {
+								if (objP.Value.(comm.Order).Price == obj.Value.(comm.Order).Price) && (objP.Value.(comm.Order).Timestamp == obj.Value.(comm.Order).Timestamp) {
+									if objP.Value.(comm.Order).ID == obj.Value.(comm.Order).ID {
 										bFind = true
 										break
 									}
@@ -2587,8 +2199,8 @@ func (t *TradePool) rmAskOrderByTarget(target int) bool {
 							operDirection = -1
 							for targetP = targetP + operDirection; targetP >= 0 && targetP < len(t.askPoolSlice); targetP = targetP + operDirection {
 								objP = t.askPoolSlice[targetP]
-								if (objP.Value.(Order).Price == obj.Value.(Order).Price) && (objP.Value.(Order).Timestamp == obj.Value.(Order).Timestamp) {
-									if objP.Value.(Order).ID == obj.Value.(Order).ID {
+								if (objP.Value.(comm.Order).Price == obj.Value.(comm.Order).Price) && (objP.Value.(comm.Order).Timestamp == obj.Value.(comm.Order).Timestamp) {
+									if objP.Value.(comm.Order).ID == obj.Value.(comm.Order).ID {
 										bFind = true
 										break
 									}
@@ -2612,7 +2224,7 @@ func (t *TradePool) rmAskOrderByTarget(target int) bool {
 			t.askPoolSlice = removeFromSlice(targetP, t.askPoolSlice)
 		} else {
 			t.dump()
-			panic(fmt.Errorf("RmAskOrderByTarget order id(%d) not found at askPoolSlice", obj.Value.(Order).ID))
+			panic(fmt.Errorf("RmAskOrderByTarget order id(%d) not found at askPoolSlice", obj.Value.(comm.Order).ID))
 		}
 	} else {
 		panic("RmAskOrderByTarget remove order from askPoolSlice fail! data in askPoolSlice and askPoolIDSlice not sync!")
@@ -2642,7 +2254,7 @@ func (t *TradePool) rmAskOrderByID(id int64) bool {
 	}
 }
 
-func orderValidatable(o *Order) bool {
+func orderValidatable(o *comm.Order) bool {
 	if o.Price <= 0 || o.Volume <= 0 {
 		return false
 	}
@@ -2662,21 +2274,21 @@ func volumeValidatable(v float64) {
 }
 
 func (t *TradePool) trade() {
-	/// debug:
-	///TimeDot1 := time.Now().UnixNano()
 
-	orderAsk, sucAsk := t.getTop(TradeType_ASK)
-	orderBid, sucBid := t.getTop(TradeType_BID)
-	var bidStatus, askStatus TradeStatus
+	orderAsk, sucAsk := t.getTop(comm.TradeType_ASK)
+	orderBid, sucBid := t.getTop(comm.TradeType_BID)
+	var bidStatus, askStatus comm.TradeStatus
 
 	if sucAsk && sucBid {
 		if orderValidatable(orderAsk) && orderValidatable(orderBid) {
 			if orderBid.Price >= orderAsk.Price {
-				orderAsk, sucAsk = t.popTop(TradeType_ASK)
-				orderBid, sucBid = t.popTop(TradeType_BID)
+				TimeDot1 := time.Now().UnixNano()
+
+				orderAsk, sucAsk = t.popTop(comm.TradeType_ASK)
+				orderBid, sucBid = t.popTop(comm.TradeType_BID)
 				if sucAsk && sucBid {
 					/// debug:
-					DebugPrintf(MODULE_NAME, LOG_LEVEL_TRACK, `=======>>>%s-%s Order Matching<<<======
+					comm.DebugPrintf(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_TRACK, `=======>>>%s-%s Order Matching<<<======
 	BID order == symbol:%s, id:%d, user:%s, time:%d, price:%f, volume:%f
 	ASK order == symbol:%s, id:%d, user:%s, time:%d, price:%f, volume:%f
 `,
@@ -2708,10 +2320,12 @@ func (t *TradePool) trade() {
 					///update the order
 					if orderBid.Volume == orderAsk.Volume {
 						/// updeate order status
-						bidStatus = ORDER_FILLED
-						askStatus = ORDER_FILLED
+						bidStatus = comm.ORDER_FILLED
+						askStatus = comm.ORDER_FILLED
 
 						///debug info
+						t.debug.DebugInfo_AskTradeOutputAdd()
+						t.debug.DebugInfo_BidTradeOutputAdd()
 						t.debug.DebugInfo_AskTradeCompleteAdd()
 						t.debug.DebugInfo_BidTradeCompleteAdd()
 					} else {
@@ -2720,8 +2334,8 @@ func (t *TradePool) trade() {
 							t.addQuick(orderBid)
 
 							/// updeate order status
-							bidStatus = ORDER_PARTIAL_FILLED
-							askStatus = ORDER_FILLED
+							bidStatus = comm.ORDER_PARTIAL_FILLED
+							askStatus = comm.ORDER_FILLED
 							///debug info
 							t.debug.DebugInfo_BidTradeOutputAdd()
 							t.debug.DebugInfo_AskTradeCompleteAdd()
@@ -2730,8 +2344,8 @@ func (t *TradePool) trade() {
 							t.addQuick(orderAsk)
 
 							/// updeate order status
-							bidStatus = ORDER_FILLED
-							askStatus = ORDER_PARTIAL_FILLED
+							bidStatus = comm.ORDER_FILLED
+							askStatus = comm.ORDER_PARTIAL_FILLED
 							///debug info
 							t.debug.DebugInfo_BidTradeCompleteAdd()
 							t.debug.DebugInfo_AskTradeOutputAdd()
@@ -2739,12 +2353,12 @@ func (t *TradePool) trade() {
 					}
 
 					///trade output
-					orderTemp := Order{orderBid.ID, orderBid.Who, TradeType_BID, orderBid.Symbol, orderBid.Timestamp, orderBid.EnOrderPrice, tradePrice, tradeVolume, orderBid.TotalVolume, orderBid.Fee, bidStatus, orderBid.IPAddr}
-					tradeBid := Trade{orderTemp, tradeBidAmount, time.Now().UnixNano(), tradeVolume * orderBid.Fee}
-					orderTemp = Order{orderAsk.ID, orderAsk.Who, TradeType_ASK, orderAsk.Symbol, orderAsk.Timestamp, orderAsk.EnOrderPrice, tradePrice, tradeVolume, orderAsk.TotalVolume, orderAsk.Fee, askStatus, orderAsk.IPAddr}
-					tradeAsk := Trade{orderTemp, tradeAskAmount, time.Now().UnixNano(), tradeAmount * orderAsk.Fee}
+					orderTemp := comm.Order{orderBid.ID, orderBid.Who, comm.TradeType_BID, orderBid.Symbol, orderBid.Timestamp, orderBid.EnOrderPrice, tradePrice, tradeVolume, orderBid.TotalVolume, orderBid.Fee, bidStatus, orderBid.IPAddr}
+					tradeBid := comm.Trade{orderTemp, tradeBidAmount, time.Now().UnixNano(), tradeVolume * orderBid.Fee}
+					orderTemp = comm.Order{orderAsk.ID, orderAsk.Who, comm.TradeType_ASK, orderAsk.Symbol, orderAsk.Timestamp, orderAsk.EnOrderPrice, tradePrice, tradeVolume, orderAsk.TotalVolume, orderAsk.Fee, askStatus, orderAsk.IPAddr}
+					tradeAsk := comm.Trade{orderTemp, tradeAskAmount, time.Now().UnixNano(), tradeAmount * orderAsk.Fee}
 					///To do: put to channel to send to database
-					t.outChannel.In(&OutPoolElem{trade: &MatchTrade{&tradeBid, &tradeAsk, -1, -1}, cancelOrder: nil, type_: OUTPOOL_MATCHTRADE})
+					t.MultiChanOut.InChannel(&chs.OutElem{Trade: &chs.MatchTrade{&tradeBid, &tradeAsk}, CancelOrder: nil, Type_: chs.OUTPOOL_MATCHTRADE, Count: 0})
 
 				} else {
 					if !sucAsk && sucBid {
@@ -2760,6 +2374,10 @@ func (t *TradePool) trade() {
 					}
 					///panic("Trade process logic error, need process!========================!")
 				}
+
+				TimeDot2 := time.Now().UnixNano()
+				t.debug.DebugInfo_RecordCorePerform(TimeDot2 - TimeDot1)
+				// fmt.Printf("MEXCore.match trade performance(second this round): %.9f \n", float64(TimeDot2-TimeDot1)/float64(1*time.Second))
 			} else {
 				//fmt.Print("trade no match order to trade... ", "\n")
 			}
@@ -2769,9 +2387,6 @@ func (t *TradePool) trade() {
 			panic("pool data illegel, need process!========================!")
 		}
 	}
-	/// debug:
-	///TimeDot2 := time.Now().UnixNano()
-	///DebugPrintf(MODULE_NAME, LOG_LEVEL_DEBUG,"%s-%s Engine Trade one round complete. ****USE_TIME: %f\n", t.Symbol, t.MarketType.String(), float64(TimeDot2-TimeDot1)/float64(1*time.Second))
 }
 
 func (t *TradePool) match() {
@@ -2783,7 +2398,7 @@ func (t *TradePool) match() {
 		case TradeControl_Pause:
 			time.Sleep(1 * time.Second)
 			runtime.Gosched()
-			DebugPrintf(MODULE_NAME, LOG_LEVEL_TRACK, "%s-%s Match Routing on idle...\n", t.Symbol, t.MarketType.String())
+			comm.DebugPrintf(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_TRACK, "%s-%s Match Routing on idle...\n", t.Symbol, t.MarketType.String())
 			continue
 		case TradeControl_Work:
 
@@ -2795,15 +2410,15 @@ func (t *TradePool) match() {
 
 		/// Record beatheart
 		t.doctor.RecordBeatHeart(doctor.RunningType_Match)
-		time.Sleep(MECORE_MATCH_DURATION)
+		time.Sleep(comm.MECORE_MATCH_DURATION)
 		runtime.Gosched()
 	}
 }
 
 func (t *TradePool) input(cur int) {
 	var (
-		v  *Order = nil
-		ok bool   = false
+		v  *comm.Order = nil
+		ok bool        = false
 	)
 
 	for {
@@ -2812,7 +2427,7 @@ func (t *TradePool) input(cur int) {
 		case TradeControl_Stop:
 			time.Sleep(1 * time.Second)
 			runtime.Gosched()
-			DebugPrintf(MODULE_NAME, LOG_LEVEL_TRACK, "%s-%s Input Routing on idle...\n", t.Symbol, t.MarketType.String())
+			comm.DebugPrintf(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_TRACK, "%s-%s Input Routing on idle...\n", t.Symbol, t.MarketType.String())
 			continue
 		case TradeControl_Work:
 		case TradeControl_Pause:
@@ -2824,7 +2439,7 @@ func (t *TradePool) input(cur int) {
 		v, ok = t.InChannel.Out(cur)
 		if ok {
 			///debug===
-			DebugPrintf(MODULE_NAME, LOG_LEVEL_TRACK, `=======================>>>>>>>>>>%s-%s Order Input[%d]
+			comm.DebugPrintf(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_TRACK, `=======================>>>>>>>>>>%s-%s Order Input[%d]
 	Order id:%d, user:%s, type:%s, symbol:%s, time:%d, price:%f, volume:%f, tatalVolume:%f, fee:%f
 	Get from Inchannel(cap:%d, len:%d)
 `,
@@ -2838,22 +2453,11 @@ func (t *TradePool) input(cur int) {
 			err, errCode := use_mysql.MEMySQLInstance().EnOrder(v)
 			if err != nil {
 				if errCode == use_mysql.ErrorCode_DupPrimateKey {
-					DebugPrintf(MODULE_NAME, LOG_LEVEL_TRACK, "EnOrder fail, Retry to do it once more.\n")
+					comm.DebugPrintf(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_TRACK, "EnOrder fail, Retry to do it once more.\n")
 					v.ID = time.Now().UnixNano()
 					goto reEnorder_
-					//					err = use_mysql.MEMySQLInstance().EnOrder(v)
-					//					if err != nil {
-					//						DebugPrintf(MODULE_NAME, LOG_LEVEL_TRACK, "EnOrder fail, Retry to do it twice more.\n")
-					//						v.ID = time.Now().UnixNano()
-					//						err = use_mysql.MEMySQLInstance().EnOrder(v)
-					//						if err != nil {
-					//							DebugPrintf(MODULE_NAME, LOG_LEVEL_TRACK, "EnOrder fail, need to retry.\n")
-					//							continue
-					//						}
-					//					}
-
 				} else {
-					DebugPrintf(MODULE_NAME, LOG_LEVEL_TRACK, "EnOrder fail, errCode = %s.\n", errCode.String())
+					comm.DebugPrintf(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_TRACK, "EnOrder fail, errCode = %s.\n", errCode.String())
 					continue
 				}
 			}
@@ -2872,8 +2476,8 @@ func (t *TradePool) input(cur int) {
 
 func (t *TradePool) inputBlock() {
 	var (
-		v  *Order = nil
-		ok bool   = false
+		v  *comm.Order = nil
+		ok bool        = false
 	)
 
 	for {
@@ -2882,7 +2486,7 @@ func (t *TradePool) inputBlock() {
 		case TradeControl_Stop:
 			time.Sleep(1 * time.Second)
 			runtime.Gosched()
-			DebugPrintf(MODULE_NAME, LOG_LEVEL_TRACK, "%s-%s Input Routing on idle...\n", t.Symbol, t.MarketType.String())
+			comm.DebugPrintf(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_TRACK, "%s-%s Input Routing on idle...\n", t.Symbol, t.MarketType.String())
 			continue
 		case TradeControl_Work:
 		case TradeControl_Pause:
@@ -2893,7 +2497,7 @@ func (t *TradePool) inputBlock() {
 		v, ok = <-t.InChannelBlock
 		if ok {
 			///debug===
-			DebugPrintf(MODULE_NAME, LOG_LEVEL_TRACK, `=======================>>>>>>>>>>%s-%s Order Input[Block mode]
+			comm.DebugPrintf(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_TRACK, `=======================>>>>>>>>>>%s-%s Order Input[Block mode]
 	Order id:%d, user:%s, type:%s, symbol:%s, time:%d, price:%f, volume:%f, tatalVolume:%f, fee:%f
 	Get from Inchannel(cap:%d, len:%d)
 `,
@@ -2901,23 +2505,6 @@ func (t *TradePool) inputBlock() {
 				v.ID, v.Who, v.AorB.String(), v.Symbol, v.Timestamp, v.Price, v.Volume, v.TotalVolume, v.Fee,
 				INCHANNEL_BUFF_SIZE, len(t.InChannelBlock),
 			)
-
-			//			//// Enorder to Match Engine Duration Storage
-			//			err := use_mysql.MEMySQLInstance().EnOrder(v)
-			//			if err != nil {
-			//				DebugPrintf(MODULE_NAME, LOG_LEVEL_TRACK, "EnOrder fail, Retry to do it once more.\n")
-			//				v.ID = time.Now().UnixNano()
-			//				err = use_mysql.MEMySQLInstance().EnOrder(v)
-			//				if err != nil {
-			//					DebugPrintf(MODULE_NAME, LOG_LEVEL_TRACK, "EnOrder fail, Retry to do it twice more.\n")
-			//					v.ID = time.Now().UnixNano()
-			//					err = use_mysql.MEMySQLInstance().EnOrder(v)
-			//					if err != nil {
-			//						DebugPrintf(MODULE_NAME, LOG_LEVEL_TRACK, "EnOrder fail, need to retry.\n")
-			//						continue
-			//					}
-			//				}
-			//			}
 
 			/// Add to trade pool to match
 			v.Volume = v.TotalVolume
@@ -2931,50 +2518,49 @@ func (t *TradePool) inputBlock() {
 	}
 }
 
-func (t *TradePool) output(index int) {
+func (t *TradePool) matchtradeOutput(bidTrade *comm.Trade, askTrade *comm.Trade) {
+
+	/// debug:
+	comm.DebugPrintf(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_TRACK, "%s-%s MatchTrade(bid:%d,ask:%d) Output to channel=======================>>>>>>>>>>\n",
+		t.Symbol, t.MarketType.String(), bidTrade.ID, askTrade.ID)
+
+	//// Update bid and ask trade output to ds:
+	err, _ := use_mysql.MEMySQLInstance().UpdateTrade(bidTrade, askTrade)
+	if err != nil {
+		panic(err)
+	}
+
+	//// Update tickers infomation
+	tradePair := te.TradePair{bidTrade, askTrade}
+	t.tickerEngine.UpdateTicker(&tradePair)
+}
+
+func (t *TradePool) cancelOrderOutput(order *comm.Order) {
+	/// debug:
+	comm.DebugPrintf(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_TRACK, "%s-%s CancelOrder(id:%d) Output to channel=======================>>>>>>>>>>\n",
+		t.Symbol, t.MarketType.String(), order.ID)
+
+	/// 2.1: Settle fund and remove from duration storage
+	err, _ := use_mysql.MEMySQLInstance().CancelOrder(order)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func (t *TradePool) multiChanOutProc(chNO int) {
 	var (
-		v  *OutPoolElem = nil
+		v  *chs.OutElem = nil
 		ok bool         = false
 	)
 
 	for {
-		v, ok = t.outChannel.Out(index)
+		v, ok = t.MultiChanOut.OutChannel(chNO)
 		if ok {
-			switch v.type_ {
-			case OUTPOOL_MATCHTRADE:
-				/// debug:
-				DebugPrintf(MODULE_NAME, LOG_LEVEL_TRACK, "%s-%s MatchTrade(bid:%d,ask:%d) Output to channel[%d]=======================>>>>>>>>>>\n",
-					t.Symbol, t.MarketType.String(), v.trade.bidTrade.ID, v.trade.askTrade.ID, index)
-
-				//// Update bid and ask trade output to ds:
-				err, _ := use_mysql.MEMySQLInstance().UpdateTrade(v.trade.bidTrade, v.trade.askTrade)
-				if err != nil {
-					panic(err)
-				}
-
-				//// Update tickers infomation
-				tradePair := TradePair{v.trade.bidTrade, v.trade.askTrade}
-				t.tickerEngine.UpdateTicker(&tradePair)
-
-			case OUTPOOL_CANCELORDER:
-				/// debug:
-				DebugPrintf(MODULE_NAME, LOG_LEVEL_TRACK, "%s-%s CancelOrder(id:%d) Output to channel[%d]=======================>>>>>>>>>>\n",
-					t.Symbol, t.MarketType.String(), v.cancelOrder.order.ID, index)
-
-				/// 2.1: Settle fund and remove from duration storage
-				err, _ := use_mysql.MEMySQLInstance().CancelOrder(v.cancelOrder.order)
-				if err != nil {
-					panic(err)
-				}
-
-			}
-		} else {
-			switch v.type_ {
-			case OUTPOOL_MATCHTRADE:
-				DebugPrintf(MODULE_NAME, LOG_LEVEL_DEBUG, "%s-%s Output outChannel[%d] with mt[bid.id=%d, ask.id=%d] not processed. \n", t.Symbol, t.MarketType.String(), index, v.trade.bidTrade.ID, v.trade.askTrade.ID)
-
-			case OUTPOOL_CANCELORDER:
-				DebugPrintf(MODULE_NAME, LOG_LEVEL_DEBUG, "%s-%s Output outChannel[%d] with order[id=%d] not processed. \n", t.Symbol, t.MarketType.String(), index, v.cancelOrder.order.ID)
+			switch v.Type_ {
+			case chs.OUTPOOL_MATCHTRADE:
+				t.matchtradeOutput(v.Trade.BidTrade, v.Trade.AskTrade)
+			case chs.OUTPOOL_CANCELORDER:
+				t.cancelOrderOutput(v.CancelOrder.Order)
 			}
 		}
 
@@ -2985,15 +2571,15 @@ func (t *TradePool) output(index int) {
 
 func (t *TradePool) cancel() {
 	var (
-		v  *Order = nil
-		ok bool   = false
+		v  *comm.Order = nil
+		ok bool        = false
 	)
 
 	for {
 		v, ok = <-t.CancelChannel
 		if ok {
 			/// debug:
-			DebugPrintf(MODULE_NAME, LOG_LEVEL_TRACK, `=======================>>>>>>>>>>%s-%s Cancel Order Input
+			comm.DebugPrintf(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_TRACK, `=======================>>>>>>>>>>%s-%s Cancel Order Input
 	User:%s, Symbol:%s, ID:%d, Type: %s, Price:%f, Timestamp:%d
 	Get from CancelChannel(cap:%d, len:%d)
 `,
@@ -3005,9 +2591,9 @@ func (t *TradePool) cancel() {
 			/// 1: Remove order from ME trade pool
 			if ok, orderCorpse := t.cancelProcess(v); ok {
 				/// 2: Settle fund and remove from duration storage
-				t.outChannel.In(&OutPoolElem{trade: nil, cancelOrder: &CancelOrder{&orderCorpse, -1}, type_: OUTPOOL_CANCELORDER})
+				t.MultiChanOut.InChannel(&chs.OutElem{Trade: nil, CancelOrder: &chs.CanceledOrder{&orderCorpse}, Type_: chs.OUTPOOL_CANCELORDER, Count: 0})
 			} else {
-				DebugPrintf(MODULE_NAME, LOG_LEVEL_TRACK, "%s-%s To Cancel Order(ID=%d) not in trade pool, Perhaps had been matched out, or input order illegal.\n", t.Symbol, t.MarketType.String(), v.ID)
+				comm.DebugPrintf(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_TRACK, "%s-%s To Cancel Order(ID=%d) not in trade pool, Perhaps had been matched out, or input order illegal.\n", t.Symbol, t.MarketType.String(), v.ID)
 				continue
 			}
 		} else {
@@ -3015,24 +2601,24 @@ func (t *TradePool) cancel() {
 		}
 
 		t.doctor.RecordBeatHeart(doctor.RunningType_CancelOrder)
-		time.Sleep(MECORE_CANCEL_DURATION)
+		time.Sleep(comm.MECORE_CANCEL_DURATION)
 		runtime.Gosched()
 	}
 }
 
 /// cancel order function
-func (t *TradePool) cancelProcess(order *Order) (bool, Order) {
-	DebugPrintf(MODULE_NAME, LOG_LEVEL_TRACK, "%s-%s TradePool CancelProcess Order ID(%d), Time(%d)\n", t.Symbol, t.MarketType.String(), order.ID, order.Timestamp)
+func (t *TradePool) cancelProcess(order *comm.Order) (bool, comm.Order) {
+	comm.DebugPrintf(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_TRACK, "%s-%s TradePool CancelProcess Order ID(%d), Time(%d)\n", t.Symbol, t.MarketType.String(), order.ID, order.Timestamp)
 	if order == nil {
 		fmt.Printf("%s-%s Cancel input order==nil error!\n", t.Symbol, t.MarketType.String())
-		return false, Order{}
+		return false, comm.Order{}
 	}
 	if order.Symbol != t.Symbol {
 		fmt.Printf("Market(%s-%s) cancelProcess illegal order with symbol(%s) to %s Match Engine", t.Symbol, t.MarketType.String(), order.Symbol, t.Symbol)
-		return false, Order{}
+		return false, comm.Order{}
 	}
 
-	if order.AorB == TradeType_BID {
+	if order.AorB == comm.TradeType_BID {
 		t.bidPoolRWMutex.Lock("CancelProcess BID")
 		defer t.bidPoolRWMutex.Unlock("CancelProcess BID")
 
@@ -3040,19 +2626,19 @@ func (t *TradePool) cancelProcess(order *Order) (bool, Order) {
 		TimeDot1 := time.Now().UnixNano()
 		target, suc := t.orderCheck(order)
 		if !suc {
-			DebugPrintf(MODULE_NAME, LOG_LEVEL_TRACK,
+			comm.DebugPrintf(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_TRACK,
 				"%s-%s Cancel OrderCheck ID(%d) fail! Order perhaps not exist or had been processed or input order illegal!\n",
 				t.Symbol, t.MarketType.String(), order.ID)
-			return false, Order{}
+			return false, comm.Order{}
 		}
 
 		/// Output the order corpse for DS operate use
-		orderCorpse := t.bidPoolIDSlice[target].Value.(Order)
+		orderCorpse := t.bidPoolIDSlice[target].Value.(comm.Order)
 		bRet := t.rmBidOrderByTarget(target)
 
 		/// debug:
 		TimeDot2 := time.Now().UnixNano()
-		DebugPrintf(MODULE_NAME, LOG_LEVEL_TRACK,
+		comm.DebugPrintf(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_TRACK,
 			`%s-%s TradePool CancelProcess bid order complete==
 	user:%s, id:%d, type:%s, time:%d, price:%f, volume:%f	, ****USE_TIME:%f
 `,
@@ -3060,7 +2646,7 @@ func (t *TradePool) cancelProcess(order *Order) (bool, Order) {
 			orderCorpse.Who, orderCorpse.ID, orderCorpse.AorB.String(), orderCorpse.Timestamp, orderCorpse.Price, orderCorpse.Volume, float64(TimeDot2-TimeDot1)/float64(1*time.Second),
 		)
 		return bRet, orderCorpse
-	} else if order.AorB == TradeType_ASK {
+	} else if order.AorB == comm.TradeType_ASK {
 		t.askPoolRWMutex.Lock("CancelProcess ASK")
 		defer t.askPoolRWMutex.Unlock("CancelProcess ASK")
 
@@ -3068,19 +2654,19 @@ func (t *TradePool) cancelProcess(order *Order) (bool, Order) {
 		TimeDot1 := time.Now().UnixNano()
 		target, suc := t.orderCheck(order)
 		if !suc {
-			DebugPrintf(MODULE_NAME, LOG_LEVEL_TRACK,
+			comm.DebugPrintf(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_TRACK,
 				"%s-%s Cancel OrderCheck ID(%d) fail! Order perhaps not exist or had been processed or input order illegal!\n",
 				t.Symbol, t.MarketType.String(), order.ID)
-			return false, Order{}
+			return false, comm.Order{}
 		}
 
 		/// Output the order corpse for DS operate use
-		orderCorpse := t.askPoolIDSlice[target].Value.(Order)
+		orderCorpse := t.askPoolIDSlice[target].Value.(comm.Order)
 		bRet := t.rmAskOrderByTarget(target)
 
 		/// debug:
 		TimeDot2 := time.Now().UnixNano()
-		DebugPrintf(MODULE_NAME, LOG_LEVEL_TRACK,
+		comm.DebugPrintf(MODULE_NAME_SORTSLICE, comm.LOG_LEVEL_TRACK,
 			`%s-%s TradePool CancelProcess ask order complete==
 	user:%s, id:%d, type:%s, time:%d, price:%f, volume:%f	, ****USE_TIME:%f
 `,
@@ -3090,7 +2676,7 @@ func (t *TradePool) cancelProcess(order *Order) (bool, Order) {
 		return bRet, orderCorpse
 	} else {
 		fmt.Printf("%s-%s CancelProcess illegal order type!", t.Symbol, t.MarketType.String())
-		return false, Order{}
+		return false, comm.Order{}
 	}
 }
 
@@ -3114,14 +2700,14 @@ func (t *TradePool) test_CancelOrder(user string, id int64, symbol string) {
 func (t *TradePool) PrintHealth() {
 	fmt.Printf("=================[%s-%s Pool Health Start]=================\n", t.Symbol, t.MarketType.String())
 	fmt.Println("AskPool=============")
-	fmt.Println("askPool		==", "Length:", t.askPool.Len(), ";\tTopElem:", t.askPool.Front().Value.(Order).ID, ";\tEndElem:", t.askPool.Back().Value.(Order).ID)
-	fmt.Println("askPoolSlice	==", "Length:", len(t.askPoolSlice), ";\tTopElem:", t.askPoolSlice[0].Value.(Order).ID, ";\tEndElem:", t.askPoolSlice[len(t.askPoolSlice)-1].Value.(Order).ID)
-	fmt.Println("askPoolIDSlice	==", "Length:", len(t.askPoolIDSlice), ";\tTopElem:", t.askPoolIDSlice[0].Value.(Order).ID, ";\tEndElem:", t.askPoolIDSlice[len(t.askPoolIDSlice)-1].Value.(Order).ID)
+	fmt.Println("askPool		==", "Length:", t.askPool.Len(), ";\tTopElem:", t.askPool.Front().Value.(comm.Order).ID, ";\tEndElem:", t.askPool.Back().Value.(comm.Order).ID)
+	fmt.Println("askPoolSlice	==", "Length:", len(t.askPoolSlice), ";\tTopElem:", t.askPoolSlice[0].Value.(comm.Order).ID, ";\tEndElem:", t.askPoolSlice[len(t.askPoolSlice)-1].Value.(comm.Order).ID)
+	fmt.Println("askPoolIDSlice	==", "Length:", len(t.askPoolIDSlice), ";\tTopElem:", t.askPoolIDSlice[0].Value.(comm.Order).ID, ";\tEndElem:", t.askPoolIDSlice[len(t.askPoolIDSlice)-1].Value.(comm.Order).ID)
 
 	fmt.Println("BidPool=============")
-	fmt.Println("bidPool		==", "Length:", t.bidPool.Len(), ";\tTopElem:", t.bidPool.Front().Value.(Order).ID, ";\tEndElem:", t.bidPool.Back().Value.(Order).ID)
-	fmt.Println("bidPoolSlice	==", "Length:", len(t.bidPoolSlice), ";\tTopElem:", t.bidPoolSlice[0].Value.(Order).ID, ";\tEndElem:", t.bidPoolSlice[len(t.bidPoolSlice)-1].Value.(Order).ID)
-	fmt.Println("bidPoolIDSlice	==", "Length:", len(t.bidPoolIDSlice), ";\tTopElem:", t.bidPoolIDSlice[0].Value.(Order).ID, ";\tEndElem:", t.bidPoolIDSlice[len(t.bidPoolIDSlice)-1].Value.(Order).ID)
+	fmt.Println("bidPool		==", "Length:", t.bidPool.Len(), ";\tTopElem:", t.bidPool.Front().Value.(comm.Order).ID, ";\tEndElem:", t.bidPool.Back().Value.(comm.Order).ID)
+	fmt.Println("bidPoolSlice	==", "Length:", len(t.bidPoolSlice), ";\tTopElem:", t.bidPoolSlice[0].Value.(comm.Order).ID, ";\tEndElem:", t.bidPoolSlice[len(t.bidPoolSlice)-1].Value.(comm.Order).ID)
+	fmt.Println("bidPoolIDSlice	==", "Length:", len(t.bidPoolIDSlice), ";\tTopElem:", t.bidPoolIDSlice[0].Value.(comm.Order).ID, ";\tEndElem:", t.bidPoolIDSlice[len(t.bidPoolIDSlice)-1].Value.(comm.Order).ID)
 
 	fmt.Println("Channel=============")
 	for i := 0; i < INCHANNEL_POOL_SIZE; i++ {
@@ -3131,16 +2717,6 @@ func (t *TradePool) PrintHealth() {
 			t.InChannel.In(in)
 		} else {
 			fmt.Println("InChannel 		==", "IsClosed")
-		}
-	}
-
-	for i := 0; i < t.outChannel.Size(); i++ {
-		out, ok := t.outChannel.Out(i)
-		if ok {
-			fmt.Printf("outChannel[%d]		==Working;\tTopElem: Ask ID=%d, Bid ID=%d\n", i, out.trade.askTrade.ID, out.trade.bidTrade.ID)
-			t.outChannel.In(out)
-		} else {
-			fmt.Printf("outChannel[%d] 	==Is Closed", i)
 		}
 	}
 
@@ -3283,4 +2859,23 @@ func (t *TradePool) TradeCommand(u string, p ...interface{}) {
 	default:
 
 	}
+}
+
+func (t *TradePool) EnOrder(order *comm.Order) error {
+	if config.GetMEConfig().InPoolMode == "block" {
+		t.InChannelBlock <- order
+	} else {
+		t.InChannel.In(order)
+	}
+
+	return nil
+}
+
+func (t *TradePool) CancelOrder(id int64) error {
+	return nil
+}
+
+func (t *TradePool) CancelTheOrder(order *comm.Order) error {
+	t.CancelChannel <- order
+	return nil
 }

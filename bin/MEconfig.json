@@ -4,17 +4,18 @@
 	"JsonRPCIPPort": "localhost:7392",
 	"RESTfulIPPort": "localhost:7933",
 	
-	"MySQL_IP_ME": "127.0.0.1",
+	"MySQL_IP_ME": "localhost",
 	"MySQL_PORT_ME": 3306,
 	"MySQL_User_ME": "root",
 	"MySQL_Pwd_ME": "root",
 	
-	"MySQL_IP_TE": "127.0.0.1",
+	"MySQL_IP_TE": "localhost",
 	"MySQL_PORT_TE": 3306,
 	"MySQL_User_TE": "root",
 	"MySQL_Pwd_TE": "root",
 
-	"InPoolMode": "block",
+	"InPoolMode": "unblock",
+	"MatchAlgorithm": "heapmap",
 	"CoinList": [
 		{
 			"Mark": "Invalid",
@@ -47,32 +48,317 @@
 		{
 			"Mark": "ETH",
 			"ID": 36
-		}	
+		},
+		{
+			"Mark": "USDT",
+			"ID": 37
+		},
+		{
+			"Mark": "NEO",
+			"ID": 38
+		},
+		{
+			"Mark": "UEX",
+			"ID": 39
+		},
+		{
+			"Mark": "EOS",
+			"ID": 40
+		},
+		{
+			"Mark": "XMR",
+			"ID": 41
+		},
+		{
+			"Mark": "DASH",
+			"ID": 42
+		},
+		{
+			"Mark": "ZEC",
+			"ID": 43
+		},
+		{
+			"Mark": "ETC",
+			"ID": 44
+		},
+		{
+			"Mark": "UFN1",
+			"ID": 45
+		},
+		{
+			"Mark": "OMG",
+			"ID": 46
+		},
+		{
+			"Mark": "ZRX",
+			"ID": 47
+		},
+		{
+			"Mark": "ZIL",
+			"ID": 48
+		},
+		{
+			"Mark": "AE",
+			"ID": 49
+		},
+		{
+			"Mark": "MKR",
+			"ID": 50
+		},
+		{
+			"Mark": "BTM",
+			"ID": 51
+		},
+		{
+			"Mark": "WTC",
+			"ID": 52
+		},
+		{
+			"Mark": "MANA",
+			"ID": 53
+		},
+		{
+			"Mark": "NULS",
+			"ID": 54
+		},
+		{
+			"Mark": "ENG",
+			"ID": 55
+		},
+		{
+			"Mark": "PMC",
+			"ID": 56
+		},
+		{
+			"Mark": "WICC",
+			"ID": 57
+		},
+		{
+			"Mark": "SNT",
+			"ID": 61
+		},
+		{
+			"Mark": "PMCCC",
+			"ID": 58
+		},
+		{
+			"Mark": "GNT",
+			"ID": 59
+		},
+		{
+			"Mark": "PPT",
+			"ID": 60
+		},
+		{
+			"Mark": "MITH",
+			"ID": 62
+		},
+		{
+			"Mark": "DGD",
+			"ID": 63
+		},
+		{
+			"Mark": "IOST",
+			"ID": 64
+		},
+		{
+			"Mark": "LRC",
+			"ID": 65
+		},
+		{
+			"Mark": "ELF",
+			"ID": 66
+		},
+		{
+			"Mark": "FUN",
+			"ID": 67
+		},
+		{
+			"Mark": "KNC",
+			"ID": 68
+		},
+		{
+			"Mark": "LOOM",
+			"ID": 69
+		},
+		{
+			"Mark": "KIN",
+			"ID": 70
+		},
+		{
+			"Mark": "WAX",
+			"ID": 71
+		},
+		{
+			"Mark": "DCN",
+			"ID": 72
+		},
+		{
+			"Mark": "MCO",
+			"ID": 73
+		},
+		{
+			"Mark": "BNT",
+			"ID": 74
+		},
+		{
+			"Mark": "POWR",
+			"ID": 75
+		},
+		{
+			"Mark": "ETHOS",
+			"ID": 76
+		},
+		{
+			"Mark": "BAT",
+			"ID": 77
+		},
+		{
+			"Mark": "DROP",
+			"ID": 78
+		},
+		{
+			"Mark": "TUSD",
+			"ID": 79
+		},
+		{
+			"Mark": "REP",
+			"ID": 80
+		},
+		{
+			"Mark": "EBT",
+			"ID": 81
+		},
+		{
+			"Mark": "VET",
+			"ID": 82
+		},
+		{
+			"Mark": "NPXS",
+			"ID": 83
+		},
+		{
+			"Mark": "KCS",
+			"ID": 84
+		},
+		{
+			"Mark": "RHOC",
+			"ID": 85
+		},
+		{
+			"Mark": "XIN",
+			"ID": 86
+		},
+		{
+			"Mark": "AION",
+			"ID": 87
+		},
+		{
+			"Mark": "QASH",
+			"ID": 88
+		},
+		{
+			"Mark": "ODE",
+			"ID": 89
+		},
+		{
+			"Mark": "POLY",
+			"ID": 90
+		},
+		{
+			"Mark": "GTO",
+			"ID": 91
+		},
+		{
+			"Mark": "CTXC",
+			"ID": 92
+		},
+		{
+			"Mark": "VERI",
+			"ID": 93
+		},
+		{
+			"Mark": "DENT",
+			"ID": 94
+		},
+		{
+			"Mark": "CVC",
+			"ID": 95
+		},
+		{
+			"Mark": "SUB",
+			"ID": 96
+		},
+		{
+			"Mark": "ICX",
+			"ID": 97
+		},
+		{
+			"Mark": "HOT",
+			"ID": 98
+		},
+		{
+			"Mark": "GLOEX",
+			"ID": 99
+		},
+		{
+			"Mark": "LINK",
+			"ID": 100
+		},
+		{
+			"Mark": "NAS",
+			"ID": 101
+		},
+		{
+			"Mark": "THETA",
+			"ID": 102
+		},
+		{
+			"Mark": "ICN",
+			"ID": 103
+		},
+		{
+			"Mark": "STORJ",
+			"ID": 104
+		},
+		{
+			"Mark": "STORM",
+			"ID": 105
+		},
+		{
+			"Mark": "SALT",
+			"ID": 106
+		},
+		{
+			"Mark": "SAN",
+			"ID": 107
+		},
+		{
+			"Mark": "ABT",
+			"ID": 108
+		},
+		{
+			"Mark": "CMT",
+			"ID": 109
+		},
+		{
+			"Mark": "BRD",
+			"ID": 110
+		},
+		{
+			"Mark": "RLC",
+			"ID": 111
+		},
+		{
+			"Mark": "GVT",
+			"ID": 112
+		}
 	],
 	"Markets": [
 		{
 			"Sym": {
-				"BaseCoin": "UBT",
-				"QuoteCoin": "BTC"
-			},
-			"Market_MixHR": false,
-			"Market_Human": true,
-			"Market_Robot": true,
-			"RobotList": [
-				4,
-				5,
-				387,
-				388
-			],
-			"NoneFinanceList": [
-				387,
-				388
-			]
-		},
-		{
-			"Sym": {
-				"BaseCoin": "BCX",
-				"QuoteCoin": "BTC"
+				"BaseCoin": "BTC",
+				"QuoteCoin": "ETH"
 			},
 			"Market_MixHR": true,
 			"Market_Human": false,

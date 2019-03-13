@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	. "../../itf"
+	. "../../comm"
 
 	_ "github.com/go-sql-driver/mysql"
 )

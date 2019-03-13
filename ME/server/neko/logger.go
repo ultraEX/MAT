@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	. "../../itf"
+	. "../../comm"
 )
 
 var (

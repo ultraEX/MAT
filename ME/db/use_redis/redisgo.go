@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 
-	. "../../itf"
+	. "../../comm"
 
 	//	"reflect"
 	"strconv"

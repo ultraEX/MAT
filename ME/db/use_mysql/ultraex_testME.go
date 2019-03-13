@@ -4,8 +4,8 @@ package use_mysql
 import (
 	"fmt"
 
+	. "../../comm"
 	"../../config"
-	. "../../itf"
 )
 
 //Order:--------------

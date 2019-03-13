@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"os"
 
-	"./cmd"
-	. "./itf"
+	. "./comm"
+	cmd "./command"
 	"./markets"
 	"./server"
-	"./thrift_rpc"
+	"./server/thrift_rpc"
 
 	"github.com/VividCortex/godaemon"
 )

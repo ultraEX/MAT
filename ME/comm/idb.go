@@ -1,9 +1,4 @@
-// idb
-package itf
-
-//import (
-//	"fmt"
-//)
+package comm
 
 type IdbShortTerm interface {
 

@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	. "../itf"
+	. "../comm"
 )
 
 const (
@@ -114,7 +114,8 @@ type MEConfig struct {
 	MySQL_Pwd_TE  string `json:"MySQL_Pwd_TE"`
 
 	/// InPool Mode param -------------
-	InPoolMode string `json:"InPoolMode"` /// block and unblock inputpool mode
+	InPoolMode     string `json:"InPoolMode"` /// block and unblock inputpool mode
+	MatchAlgorithm string `json:"MatchAlgorithm"`
 
 	/// CoinType Map -------------------
 	CoinList []CoinInfo `json:"CoinList"`

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	. "../../itf"
+	. "../../comm"
 )
 
 /// tickers

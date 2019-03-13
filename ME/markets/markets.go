@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
+	. "../comm"
 	"../config"
-	. "../itf"
-	"../me"
+	me "../matchcore"
 )
 
 const (

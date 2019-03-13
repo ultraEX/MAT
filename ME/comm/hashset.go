@@ -1,5 +1,4 @@
-// hashset
-package itf
+package comm
 
 import (
 	"bytes"

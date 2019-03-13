@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
+	. "../ME/comm"
 	"../ME/config"
-	. "../ME/itf"
 	"github.com/VividCortex/godaemon"
 )
 

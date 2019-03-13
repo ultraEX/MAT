@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	. "../../itf"
+	. "../../comm"
 )
 
 const (
@@ -26,6 +26,7 @@ const (
 	ErrorCode_FundNoEnough    ErrorCode = -3
 	ErrorCode_IllUnfreezeFund ErrorCode = -4
 	ErrorCode_DupPrimateKey   ErrorCode = -5
+	ErrorCode_NoRecord        ErrorCode = -6
 )
 
 func (p ErrorCode) String() string {

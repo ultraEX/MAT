@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"time"
 
-	"../cmd"
+	"../comm"
+	cmd "../command"
 	"../config"
-	. "../itf"
 )
 
 const (
@@ -61,9 +61,6 @@ func (t *Handler) CommandProc(args *Args, reply *Reply) error {
 
 	case "dump":
 		return t.dump(args, reply)
-
-	case "dumpcm":
-		return t.dumpcm(args, reply)
 
 	case "dumpch":
 		return t.dumpch(args, reply)
@@ -130,7 +127,7 @@ func (t *Handler) version(args *Args, reply *Reply) error {
 Version: %s
 ==========================================================
 `,
-			VERSION_NO,
+			comm.VERSION_NO,
 		)
 		reply.Result += strBuff
 	}
@@ -160,14 +157,14 @@ func (t *Handler) setlog(args *Args, reply *Reply) error {
 			args.Command, args.Param1, args.Param2, args.Param3, args.Param4, args.Param5, args.Param6)
 
 		if args.Param1 == "true" {
-			SetLog2File(true)
+			comm.SetLog2File(true)
 			reply.Result += "Setlog to file: true\n"
 		} else if args.Param1 == "false" {
 			reply.Result += "Setlog to file: false\n"
-			SetLog2File(false)
+			comm.SetLog2File(false)
 		} else {
-			SwitchLog()
-			if LOG_TO_FILE {
+			comm.SwitchLog()
+			if comm.LOG_TO_FILE {
 				reply.Result += "Setlog to file: true\n"
 			} else {
 				reply.Result += "Setlog to file: false\n"
@@ -183,11 +180,11 @@ func (t *Handler) setlevel(args *Args, reply *Reply) error {
 			args.Command, args.Param1, args.Param2, args.Param3, args.Param4, args.Param5, args.Param6)
 
 		if args.Param1 != "" {
-			SetLevel(args.Param1)
+			comm.SetLevel(args.Param1)
 		} else {
-			SwitchLevel()
+			comm.SwitchLevel()
 		}
-		reply.Result += "Setlevel to " + LOG_LEVEL.String() + "\n"
+		reply.Result += "Setlevel to " + comm.LOG_LEVEL.String() + "\n"
 	}
 	return nil
 }
@@ -268,27 +265,6 @@ func (t *Handler) dump(args *Args, reply *Reply) error {
 			}
 
 		}
-	}
-	return nil
-}
-
-func (t *Handler) dumpcm(args *Args, reply *Reply) error {
-	if args.Command == "dumpcm" {
-		fmt.Printf("Get client command: %s [%s, %s, %s, %s, %s, %s]\n",
-			args.Command, args.Param1, args.Param2, args.Param3, args.Param4, args.Param5, args.Param6)
-
-		matchEng, _ := cmd.Marks.GetMatchEngine(cmd.Symbol)
-		if matchEng != nil {
-			tp := matchEng.GetTradePool(cmd.MktType)
-			if tp != nil {
-				reply.Result = tp.DumpCM()
-			} else {
-				reply.Result = cmd.MarketEngineNilWarningPrint()
-			}
-		} else {
-			reply.Result = cmd.MarketEngineNilWarningPrint()
-		}
-
 	}
 	return nil
 }
@@ -479,7 +455,7 @@ func (t *Handler) exitme(args *Args, reply *Reply) error {
 
 		go func() {
 			time.Sleep(100 * time.Millisecond)
-			Wait <- Signal_Quit
+			comm.Wait <- comm.Signal_Quit
 		}()
 		reply.Result += "exit command process complete, ME have closed.\n"
 	}
@@ -491,13 +467,13 @@ func (t *Handler) restartme(args *Args, reply *Reply) error {
 		fmt.Printf("Get client command: %s [%s, %s, %s, %s, %s, %s]\n",
 			args.Command, args.Param1, args.Param2, args.Param3, args.Param4, args.Param5, args.Param6)
 
-		reply.Result += WORK_DIR + "/" + GetExeName() + " "
+		reply.Result += comm.WORK_DIR + "/" + comm.GetExeName() + " "
 		for _, osArg := range os.Args[1:] {
 			reply.Result += (osArg + " ")
 		}
 		go func() {
 			time.Sleep(1 * time.Second)
-			Wait <- Signal_Restart
+			comm.Wait <- comm.Signal_Restart
 		}()
 	}
 	return nil

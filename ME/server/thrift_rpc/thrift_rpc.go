@@ -24,8 +24,8 @@ import (
 	"fmt"
 	"os"
 
-	"../config"
-	"../markets"
+	"../../config"
+	"../../markets"
 
 	"github.com/apache/thrift/lib/go/thrift"
 )

@@ -1,17 +1,15 @@
-// comon
-package itf
+package comm
 
 import (
+	"bytes"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
-
-	"bytes"
-	"os/exec"
 )
 
 const (
@@ -22,10 +20,10 @@ const (
 ////--------------------------------------------------------------------------------
 const (
 	COMMON_MODULE_NAME string = "[Common]: "
-	VERSION_NO         string = "0.1.4"
+	VERSION_NO         string = "0.1.5"
 
-	MECORE_MATCH_DURATION  time.Duration = 5 * time.Millisecond  /// control match speed: value smaller, action faster, unit is milisecond
-	MECORE_CANCEL_DURATION time.Duration = 50 * time.Millisecond /// control cancel speed: value smaller, action faster, unit is milisecond
+	MECORE_MATCH_DURATION  time.Duration = 50 * time.Microsecond /// control match speed: value smaller, action faster, unit is milisecond
+	MECORE_CANCEL_DURATION time.Duration = 50 * time.Microsecond /// control cancel speed: value smaller, action faster, unit is milisecond
 
 	RESTFUL_MAX_ORDER_LEVELS int64 = 20
 )
@@ -365,6 +363,15 @@ func (t *DebugLock) RUnlock(tag string) {
 	t.lock.RUnlock()
 }
 
+var db_through_pass bool = false
+
+func SetDbThroughpass(is bool) {
+	db_through_pass = is
+}
+func GetDbThroughpass() bool {
+	return db_through_pass
+}
+
 type TradeType int64
 
 const (
@@ -626,4 +633,13 @@ func SwitchNecoLog() {
 }
 func GetNecoLog() bool {
 	return NECO_LOG_SWITCH
+}
+
+func LenOfSyncMap(m *sync.Map) int {
+	c := 0
+	m.Range(func(k, v interface{}) bool {
+		c++
+		return true
+	})
+	return c
 }

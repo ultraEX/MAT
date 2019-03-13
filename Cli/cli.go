@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
+	. "../ME/comm"
 	"../ME/config"
-	. "../ME/itf"
 )
 
 var (
@@ -38,7 +38,6 @@ func initCommandList() {
 	commandList.Add("statics")
 	commandList.Add("markets")
 	commandList.Add("dump")
-	commandList.Add("dumpcm")
 	commandList.Add("dumpch")
 	commandList.Add("constructtickersfromhistorytrades")
 	commandList.Add("constructtickersfromhistorytradeswithfilter")
@@ -154,7 +153,6 @@ Command List:
 	statics
 	markets
 	dump [true/false]
-	dumpcm
 	dumpch
 	dumpticker
 	dumptrades

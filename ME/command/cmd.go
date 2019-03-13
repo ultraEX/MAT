@@ -8,10 +8,10 @@ import (
 	"strconv"
 	"strings"
 
+	. "../comm"
 	"../config"
 	"../db/use_mysql"
 	"../db/use_redis"
-	. "../itf"
 	"../markets"
 )
 
@@ -52,9 +52,9 @@ func Command(m *markets.Markets) {
 	fmt.Print("========================Matching Debug Back End Work Start========================\n")
 	fmt.Print(`
   ==  Command	list below is support to debug the engine
-  ==  dump:		list all orders. eg. dump; dumpcm: list output pool iosequence info
-  ==  dumpcm:	list outpool channel map info. id map sequence of in and out
+  ==  dump:		list all orders. eg. dump; 
   ==  dumpch:	list outpool channel usage info. 
+  ==  dumpcm:	list order ids map channellist info. 
   ==  dumpticker:	list tickers info of current symbol. 
   ==  dumptrades:	dump latest trades (about 100 items)
   ==  beatheart:	list all heart beat info in the me
@@ -62,6 +62,9 @@ func Command(m *markets.Markets) {
   ==  markets:	get engines' match work statics info(all markets)
   ==  faulty:	get markets faulty infomation, if one of more market fault, markets would be faulty
   ==  setInfo:	set debug info auto display. eg. setInfo true
+  ==  setlevel: set debug info level
+  ==  setdbpass: set db through pass out using to test core throughput
+  ==  resetinfo: reset debug staics info from now on
   ==  setlog:	control log switch
   ==  setnecolog:	control neco log switch
   ---------------------------------------------------------------------------------
@@ -152,6 +155,17 @@ func Command(m *markets.Markets) {
 			}
 		}
 
+		/// setdbpass command:========================================
+		if command == "setdbpass" {
+			fmt.Printf("GetCommand: %s %s\n", command, param1)
+			if param1 == "true" {
+				SetDbThroughpass(true)
+			} else {
+				SetDbThroughpass(false)
+			}
+
+		}
+
 		/// dump command:========================================
 		if command == "dump" {
 			fmt.Printf("GetCommand: %s %s\n", command, param1)
@@ -194,22 +208,6 @@ func Command(m *markets.Markets) {
 			}
 		}
 
-		/// dumpcm command:========================================
-		if command == "dumpcm" {
-			fmt.Printf("GetCommand: %s\n", command)
-			matchEng, err := Marks.GetMatchEngine(Symbol)
-			if matchEng != nil {
-				tp := matchEng.GetTradePool(MktType)
-				if tp != nil {
-					tp.DumpCM()
-				} else {
-					MarketEngineNilWarningPrint()
-				}
-			} else {
-				fmt.Println(err)
-			}
-		}
-
 		/// dumpch command:========================================
 		if command == "dumpch" {
 			fmt.Printf("GetCommand: %s\n", command)
@@ -218,6 +216,22 @@ func Command(m *markets.Markets) {
 				tp := matchEng.GetTradePool(MktType)
 				if tp != nil {
 					tp.DumpChannel()
+				} else {
+					MarketEngineNilWarningPrint()
+				}
+			} else {
+				fmt.Println(err)
+			}
+		}
+
+		/// dumpcm command:========================================
+		if command == "dumpcm" {
+			fmt.Printf("GetCommand: %s\n", command)
+			matchEng, err := Marks.GetMatchEngine(Symbol)
+			if matchEng != nil {
+				tp := matchEng.GetTradePool(MktType)
+				if tp != nil {
+					tp.DumpChanlsMap()
 				} else {
 					MarketEngineNilWarningPrint()
 				}
@@ -294,6 +308,25 @@ func Command(m *markets.Markets) {
 		if command == "faulty" {
 			fmt.Printf("GetCommand: %s\n", command)
 			fmt.Println(Marks.IsFaulty())
+		}
+
+		/// resetinfo command:========================================
+		if command == "resetinfo" {
+			fmt.Printf("GetCommand: %s\n", command)
+
+			matchEng, err := Marks.GetMatchEngine(Symbol)
+			if matchEng != nil {
+				tp := matchEng.GetTradePool(MktType)
+				if tp != nil {
+					tp.RestartDebuginfo()
+					tp.ResetMatchCorePerform()
+					fmt.Printf("Debuginfo Reset at time: %s\n", GetDateTime())
+				} else {
+					MarketEngineNilWarningPrint()
+				}
+			} else {
+				fmt.Println(err)
+			}
 		}
 
 		/// constructtickersfromhistorytrades command:========================================
@@ -422,6 +455,8 @@ func Command(m *markets.Markets) {
 	setinfo [true/false]
 	setlog	[true/false]
 	setnecolog [true/false]
+	setdbpass [true/false]
+	resetinfo
 	-------------------------------------------------------------------------
 	Engine Work Status:
 	trade stop
@@ -436,8 +471,8 @@ func Command(m *markets.Markets) {
 	-------------------------------------------------------------------------
 	Pool dump:
 	dump true/false
-	dumpcm 
 	dumpch
+	dumpcm
 	dumpticker
 	dumptrades
 	faulty

@@ -26,10 +26,10 @@ import (
 
 	"strconv"
 
-	"../config"
-	"../db/use_mysql"
-	. "../itf"
-	"../markets"
+	. "../../comm"
+	"../../config"
+	"../../db/use_mysql"
+	"../../markets"
 	"./gen-go/rpc_order"
 )
 
@@ -113,7 +113,7 @@ func (p *IOrderHandler) EnOrder(ctx context.Context, order *rpc_order.Order) (r 
 	}
 
 	meOrder := Order{
-		ID:           time.Now().UnixNano(),
+		ID:           0,
 		Who:          order.Who,
 		AorB:         aorb,
 		Symbol:       order.Symbol,
@@ -134,49 +134,34 @@ func (p *IOrderHandler) EnOrder(ctx context.Context, order *rpc_order.Order) (r 
 		return &rpc_order.ReturnInfo{Status: rpc_order.RetunStatus_FAIL, Info: "EnOrder symbol not support.", Order: nil}, fmt.Errorf("EnOrder symbol(%s) not support.", meOrder.Symbol)
 	}
 
+	matchEng, _ := p.marks.GetMatchEngine(meOrder.Symbol)
+	if matchEng == nil {
+		panic(fmt.Errorf("EnOrder unbelievable error occur."))
+	}
+
+	meOrder.Volume = meOrder.TotalVolume
+	meOrder.ID = matchEng.GetTradePool(marketType).CreateID()
 	if config.GetMEConfig().InPoolMode == "block" {
 		//// Enorder to Match Engine Duration Storage
-	reEnorder_:
+
 		err, errCode = use_mysql.MEMySQLInstance().EnOrder(&meOrder)
 		if err != nil {
 			DebugPrintln(rpc_order.MODULE_NAME, LOG_LEVEL_ALWAYS, err)
 			if errCode == use_mysql.ErrorCode_DupPrimateKey {
 				DebugPrintf(rpc_order.MODULE_NAME, LOG_LEVEL_FATAL, "EnOrder fail, Retry to do it once more.\n")
-				meOrder.ID = time.Now().UnixNano()
-				///err, errCode = use_mysql.MEMySQLInstance().EnOrder(&meOrder)
-				goto reEnorder_
-				//				if err != nil {
-				//					if errCode == use_mysql.ErrorCode_DupPrimateKey {
-				//						DebugPrintf(rpc_order.MODULE_NAME, LOG_LEVEL_FATAL, "EnOrder fail, Retry to do it twice more.\n")
-				//						meOrder.ID = time.Now().UnixNano()
-				//						err, _ = use_mysql.MEMySQLInstance().EnOrder(&meOrder)
-				//						if err != nil {
-				//							return &rpc_order.ReturnInfo{Status: rpc_order.RetunStatus_FAIL, Info: "EnOrder fail. Please retry.", Order: nil}, err
-				//						}
-				//					}
-				//				}
+				panic(fmt.Errorf("duplicate order id should not occur, please check it !!!"))
+
 			} else if errCode == use_mysql.ErrorCode_FundNoEnough {
 				return &rpc_order.ReturnInfo{Status: rpc_order.RetunStatus_FAIL, Info: "EnOrder fail. Fund not enough.", Order: nil}, err
 			} else {
 				return &rpc_order.ReturnInfo{Status: rpc_order.RetunStatus_FAIL, Info: "EnOrder fail. Please retry.", Order: nil}, err
 			}
 		}
-		/// Put the order in the match engine to process
-		meOrder.Volume = meOrder.TotalVolume
-		matchEng, _ := p.marks.GetMatchEngine(meOrder.Symbol)
-		if matchEng != nil {
-			matchEng.GetTradePool(marketType).InChannelBlock <- &meOrder
-		} else {
-			panic(fmt.Errorf("EnOrder unbelievable error occur."))
-		}
 
+		/// Put the order in the match engine to process
+		matchEng.GetTradePool(marketType).EnOrder(&meOrder)
 	} else {
-		matchEng, _ := p.marks.GetMatchEngine(meOrder.Symbol)
-		if matchEng != nil {
-			matchEng.GetTradePool(marketType).InChannel.In(&meOrder)
-		} else {
-			panic(fmt.Errorf("EnOrder unbelievable error occur."))
-		}
+		matchEng.GetTradePool(marketType).EnOrder(&meOrder)
 	}
 
 	/// Construct Return Info:
@@ -218,7 +203,8 @@ func (p *IOrderHandler) toCancelOrder(symbol string, user string, id int64) (ord
 	meOrder.Status = ORDER_CANCELING
 	matchEng, _ := p.marks.GetMatchEngine(symbol)
 	if matchEng != nil {
-		matchEng.GetTradePool(marketType).CancelChannel <- meOrder
+		// matchEng.GetTradePool(marketType).CancelChannel <- meOrder
+		matchEng.GetTradePool(marketType).CancelTheOrder(meOrder)
 	} else {
 		panic(fmt.Errorf("toCancelOrder unbelievable error occur."))
 	}

@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"time"
 
+	. "../../comm"
 	"../../config"
-	. "../../itf"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -17,6 +17,43 @@ import (
 ///---------------------------------------------------------------------------------------------------
 /// EnOrder = FundFreeze + AddOrder
 func (t *MEMySQLDB) EnOrder(order *Order) (error, ErrorCode) {
+	if !GetDbThroughpass() {
+		return t.enOrder(order)
+	} else {
+		return nil, ErrorCode_OK
+	}
+}
+
+///---------------------------------------------------------------------------------------------------
+/// CancelOrder = UnfreezeFund + RmOrder
+func (t *MEMySQLDB) CancelOrder(order *Order) (error, ErrorCode) {
+	if !GetDbThroughpass() {
+		return t.cancelOrder(order)
+	} else {
+		return nil, ErrorCode_OK
+	}
+}
+
+/// UpdateTrade = Update trade couple = (BID+ASK)*(Trade update + Order update + Fund update)
+func (t *MEMySQLDB) UpdateTrade(bidTrade *Trade, askTrade *Trade) (error, ErrorCode) {
+	if !GetDbThroughpass() {
+		return t.updateTrade(bidTrade, askTrade)
+	} else {
+		return nil, ErrorCode_OK
+	}
+}
+
+/// UpdateTicker with parameters
+func (t *TEMySQLDB) UpdateTicker(sym string, _type TickerType, ticker *TickerInfo) (error, ErrorCode) {
+	if !GetDbThroughpass() {
+		return t.updateTicker(sym, _type, ticker)
+	} else {
+		return nil, ErrorCode_OK
+	}
+}
+
+/// EnOrder = FundFreeze + AddOrder
+func (t *MEMySQLDB) enOrder(order *Order) (error, ErrorCode) {
 	var (
 		tx      *sql.Tx
 		err     error
@@ -78,7 +115,7 @@ retry:
 
 ///---------------------------------------------------------------------------------------------------
 /// CancelOrder = UnfreezeFund + RmOrder
-func (t *MEMySQLDB) CancelOrder(order *Order) (error, ErrorCode) {
+func (t *MEMySQLDB) cancelOrder(order *Order) (error, ErrorCode) {
 	var (
 		tx      *sql.Tx
 		err     error
@@ -174,7 +211,7 @@ retry:
 }
 
 /// UpdateTrade = Update trade couple = (BID+ASK)*(Trade update + Order update + Fund update)
-func (t *MEMySQLDB) UpdateTrade(bidTrade *Trade, askTrade *Trade) (error, ErrorCode) {
+func (t *MEMySQLDB) updateTrade(bidTrade *Trade, askTrade *Trade) (error, ErrorCode) {
 	var (
 		tx      *sql.Tx
 		err     error
@@ -296,7 +333,7 @@ retry:
 }
 
 /// UpdateTicker with parameters
-func (t *TEMySQLDB) UpdateTicker(sym string, _type TickerType, ticker *TickerInfo) (error, ErrorCode) {
+func (t *TEMySQLDB) updateTicker(sym string, _type TickerType, ticker *TickerInfo) (error, ErrorCode) {
 	err := t.AddTicker(sym, _type, ticker)
 	if err != nil {
 		panic(err)

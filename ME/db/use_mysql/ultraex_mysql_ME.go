@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
+	. "../../comm"
 	"../../config"
-	. "../../itf"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -1057,7 +1057,13 @@ func (t *MEMySQLDB) FreezeFund(order *Order, tx *sql.Tx) (error, ErrorCode) {
 		//		err = tx.QueryRowContext(newCtx, statement, whoConvertTo(order.Who), int64(cB)).Scan(&cu_id, &member_id, &currency_id, &num, &forzen_num, &status, &chongzhi_url)
 		err = tx.QueryRow(statement, whoConvertTo(order.Who), int64(cB)).Scan(&cu_id, &member_id, &currency_id, &num, &forzen_num, &status, &chongzhi_url)
 		if err != nil {
-			return err, ErrorCode_RecordLocked
+			isDeadLock, _ := regexp.Match("Error 1213: Deadlock found when trying to get lock;", []byte(err.Error()))
+			if isDeadLock {
+				DebugPrintf(MODULE_NAME, LOG_LEVEL_ALWAYS, "FreezeFund met deadlock.\n")
+				return err, ErrorCode_RecordLocked
+			} else {
+				return err, ErrorCode_Fail
+			}
 		}
 
 		//if num < order.TotalVolume {
@@ -1079,7 +1085,13 @@ func (t *MEMySQLDB) FreezeFund(order *Order, tx *sql.Tx) (error, ErrorCode) {
 		//		err = tx.QueryRowContext(newCtx, statement, whoConvertTo(order.Who), int64(cQ)).Scan(&cu_id, &member_id, &currency_id, &num, &forzen_num, &status, &chongzhi_url)
 		err = tx.QueryRow(statement, whoConvertTo(order.Who), int64(cQ)).Scan(&cu_id, &member_id, &currency_id, &num, &forzen_num, &status, &chongzhi_url)
 		if err != nil {
-			return err, ErrorCode_RecordLocked
+			isDeadLock, _ := regexp.Match("Error 1213: Deadlock found when trying to get lock;", []byte(err.Error()))
+			if isDeadLock {
+				DebugPrintf(MODULE_NAME, LOG_LEVEL_ALWAYS, "FreezeFund met deadlock.\n")
+				return err, ErrorCode_RecordLocked
+			} else {
+				return err, ErrorCode_Fail
+			}
 		}
 
 		bidCost := order.TotalVolume * order.EnOrderPrice
@@ -1151,7 +1163,13 @@ func (t *MEMySQLDB) UnfreezeFund(order *Order, tx *sql.Tx) (error, ErrorCode) {
 		statement := fmt.Sprintf("SELECT * FROM %s WHERE member_id=? AND currency_id=? FOR UPDATE", TABLE_MONEY)
 		err := tx.QueryRow(statement, whoConvertTo(order.Who), int64(cB)).Scan(&cu_id, &member_id, &currency_id, &num, &forzen_num, &status, &chongzhi_url)
 		if err != nil {
-			return err, ErrorCode_RecordLocked
+			isDeadLock, _ := regexp.Match("Error 1213: Deadlock found when trying to get lock;", []byte(err.Error()))
+			if isDeadLock {
+				DebugPrintf(MODULE_NAME, LOG_LEVEL_ALWAYS, "UnfreezeFund met deadlock.\n")
+				return err, ErrorCode_RecordLocked
+			} else {
+				return err, ErrorCode_Fail
+			}
 		}
 
 		//if forzen_num < order.Volume {
@@ -1172,7 +1190,13 @@ func (t *MEMySQLDB) UnfreezeFund(order *Order, tx *sql.Tx) (error, ErrorCode) {
 		statement := fmt.Sprintf("SELECT * FROM %s WHERE member_id=? AND currency_id=? FOR UPDATE", TABLE_MONEY)
 		err := tx.QueryRow(statement, whoConvertTo(order.Who), int64(cQ)).Scan(&cu_id, &member_id, &currency_id, &num, &forzen_num, &status, &chongzhi_url)
 		if err != nil {
-			return err, ErrorCode_RecordLocked
+			isDeadLock, _ := regexp.Match("Error 1213: Deadlock found when trying to get lock;", []byte(err.Error()))
+			if isDeadLock {
+				DebugPrintf(MODULE_NAME, LOG_LEVEL_ALWAYS, "UnfreezeFund met deadlock.\n")
+				return err, ErrorCode_RecordLocked
+			} else {
+				return err, ErrorCode_Fail
+			}
 		}
 
 		bidCost := order.Volume * order.EnOrderPrice

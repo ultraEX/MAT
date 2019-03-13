@@ -1,8 +1,9 @@
-// debug
-package me
+package runtime
 
 import (
 	"time"
+
+	"../../comm"
 )
 
 const (
@@ -19,11 +20,7 @@ type DebugUnit struct {
 
 func NewDebugUnit() *DebugUnit {
 	var obj = new(DebugUnit)
-	obj.addTimes = 0
-	obj.quickAddTimes = 0
-
-	obj.tradeOutputTimes = 0
-	obj.tradeCompleteTimes = 0
+	obj.Reset()
 
 	return obj
 }
@@ -40,10 +37,46 @@ func (t *DebugUnit) TradeOutputTimesInc() {
 func (t *DebugUnit) TradeCompleteTimesInc() {
 	t.tradeCompleteTimes++
 }
+func (t *DebugUnit) Reset() {
+	t.addTimes = 0
+	t.quickAddTimes = 0
+
+	t.tradeOutputTimes = 0
+	t.tradeCompleteTimes = 0
+}
+
+type MatchCorePerform struct {
+	max   int64
+	min   int64
+	ave   int64
+	sum   int64
+	count int64
+}
+
+func (t *MatchCorePerform) Record(v int64) {
+	t.count++
+	t.sum += v
+	if v > t.max {
+		t.max = v
+	}
+	if v < t.min {
+		t.min = v
+	}
+	t.ave = t.sum / t.count
+}
+
+func (t *MatchCorePerform) Reset() {
+	t.max, t.min, t.ave, t.sum, t.count = 0, comm.MAX_INT64, 0, 0, 0
+}
+
+func (t *MatchCorePerform) GetPerform() (max, min, ave float64) {
+	return float64(t.max) / float64(1*time.Second), float64(t.min) / float64(1*time.Second), float64(t.ave) / float64(1*time.Second)
+}
 
 type DebugInfo struct {
 	askPoolDebugInfo DebugUnit
 	bidPoolDebugInfo DebugUnit
+	MatchCorePerform
 
 	startTime int64
 }
@@ -54,8 +87,15 @@ func NewDebugInfo() *DebugInfo {
 	obj.bidPoolDebugInfo = *NewDebugUnit()
 
 	obj.startTime = time.Now().UnixNano()
+	obj.MatchCorePerform = MatchCorePerform{0, comm.MAX_INT64, 0, 0, 0}
 
 	return obj
+}
+
+func (t *DebugInfo) DebugInfo_RestartDebuginfo() {
+	t.askPoolDebugInfo.Reset()
+	t.bidPoolDebugInfo.Reset()
+	t.startTime = time.Now().UnixNano()
 }
 
 func (t *DebugInfo) DebugInfo_AskEnOrderNormalAdd() {
@@ -135,4 +175,16 @@ func (t *DebugInfo) DebugInfo_GetTradeOutputRate() float64 {
 
 func (t *DebugInfo) DebugInfo_GetUserEnOrderRate() float64 {
 	return float64(t.DebugInfo_GetUserEnOrders()) / float64((time.Now().UnixNano()-t.startTime)/int64(time.Second))
+}
+
+func (t *DebugInfo) DebugInfo_RecordCorePerform(v int64) {
+	t.MatchCorePerform.Record(v)
+}
+
+func (t *DebugInfo) DebugInfo_GetCorePerform() (max, min, ave float64) {
+	return t.MatchCorePerform.GetPerform()
+}
+
+func (t *DebugInfo) DebugInfo_ResetMatchCorePerform() {
+	t.MatchCorePerform.Reset()
 }

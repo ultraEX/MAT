@@ -25,7 +25,7 @@ import (
 
 	"./gen-go/rpc_order"
 
-	"../markets"
+	"../../markets"
 
 	"github.com/apache/thrift/lib/go/thrift"
 )

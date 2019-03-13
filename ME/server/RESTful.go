@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
+	. "../comm"
 	"../config"
-	. "../itf"
 	"./neko"
 )
 

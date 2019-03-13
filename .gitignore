@@ -1,4 +1,4 @@
-
+/ME/ME
 /StartME/StartME
 /Cli/Cli
 /bin/ME
@@ -7,6 +7,11 @@
 /bin/Tcli
 /ThriftClient/ThriftClient
 /release
+/ThriftClient/ThriftClient.exe
+/ThriftClient/MEconfig.json
+/ME/ME.exe
+.vscode/
+
 *.debug
 .idea
 debug.log

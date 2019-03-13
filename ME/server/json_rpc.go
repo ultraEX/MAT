@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
+	. "../comm"
 	"../config"
-	. "../itf"
 	jrpc2 "./jrpc2_"
 )
 

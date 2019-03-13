@@ -1,6 +1,4 @@
-// tickers
-// me
-package me
+package tickers
 
 import (
 	"container/list"
@@ -8,9 +6,9 @@ import (
 	"runtime"
 	"time"
 
+	. "../comm"
 	"../config"
 	"../db/use_mysql"
-	. "../itf"
 )
 
 const (
@@ -24,8 +22,8 @@ const (
 )
 
 type TradePair struct {
-	bidTrade *Trade
-	askTrade *Trade
+	BidTrade *Trade
+	AskTrade *Trade
 }
 
 type getLevelFunc func(limit int64) ([]OrderLevel, error)
@@ -243,14 +241,14 @@ type TickerPool struct {
 
 	TickerChannel
 
-	tpRef [config.MarketType_Num]*TradePool
+	tpRef [config.MarketType_Num]MatchCoreItf
 }
 
 func NewTickerPool(sym string, _size int) *TickerPool {
 	t := new(TickerPool)
 
 	t.init(sym, _size)
-	t.tpRef = [config.MarketType_Num]*TradePool{nil, nil, nil}
+	t.tpRef = [config.MarketType_Num]MatchCoreItf{nil, nil, nil}
 
 	go t.outPutProcess()
 
@@ -261,11 +259,11 @@ func (t *TickerPool) getLocalTimeUnixNano() int64 {
 	return time.Now().In(t.location).UnixNano()
 }
 
-func (t *TickerPool) setTradePool(p [config.MarketType_Num]*TradePool) {
+func (t *TickerPool) SetTradePool(p [config.MarketType_Num]MatchCoreItf) {
 	t.tpRef = p
 }
 
-func (t *TickerPool) getTradePool() *TradePool {
+func (t *TickerPool) getTradePool() MatchCoreItf {
 	if t.tpRef[config.MarketType_MixHR] != nil {
 		return t.tpRef[config.MarketType_MixHR]
 	}
@@ -719,6 +717,10 @@ func (t *TickerPool) UpdateTicker(trade *TradePair) {
 	t.OutChannel <- trade
 }
 
+func (t *TickerPool) GetNewestPrice() float64 {
+	return t.newestPrice
+}
+
 func (t *TickerPool) GetTicker(_type TickerType) ([]*TickerInfo, error) {
 	var (
 		tickers []*TickerInfo
@@ -1088,17 +1090,17 @@ func (t *TickerPool) ConstructTickersFromHistoryTradesByTickerType(_type TickerT
 
 	TimeDot1 := time.Now().UnixNano()
 	fmt.Printf("[%s]Begin to load trades from ds from time(%d)\n", time.Now().In(loc).Format("2006-01-02T15:04:05Z07:00"), from)
-	DebugPrintf(MODULE_NAME, LOG_LEVEL_ALWAYS, "[%s]Begin to load trades from ds from time(%d)\n", time.Now().In(loc).Format("2006-01-02T15:04:05Z07:00"), from)
+	DebugPrintf(MODULE_NAME_TICKERS, LOG_LEVEL_ALWAYS, "[%s]Begin to load trades from ds from time(%d)\n", time.Now().In(loc).Format("2006-01-02T15:04:05Z07:00"), from)
 	trades, _ = use_mysql.MEMySQLInstance().GetRelTradeForTickers(t.sym, from)
 	fmt.Printf("[%s]Complete to load trades from ds, %d items loaded.\n", time.Now().In(loc).Format("2006-01-02T15:04:05Z07:00"), len(trades))
-	DebugPrintf(MODULE_NAME, LOG_LEVEL_ALWAYS, "[%s]Complete to load trades from ds, %d items loaded.\n", time.Now().In(loc).Format("2006-01-02T15:04:05Z07:00"), len(trades))
+	DebugPrintf(MODULE_NAME_TICKERS, LOG_LEVEL_ALWAYS, "[%s]Complete to load trades from ds, %d items loaded.\n", time.Now().In(loc).Format("2006-01-02T15:04:05Z07:00"), len(trades))
 
 	for count, elem = range trades {
 		t.updateTickerByType(_type, elem)
 	}
 
 	fmt.Printf("[%s]Complete to load trades to memory using updateTickerByType(%s), %d items loaded.\n", time.Now().In(loc).Format("2006-01-02T15:04:05Z07:00"), _type, count)
-	DebugPrintf(MODULE_NAME, LOG_LEVEL_ALWAYS, "[%s]Complete to load trades to memory using updateTickerByType(%s), %d items loaded.\n", time.Now().In(loc).Format("2006-01-02T15:04:05Z07:00"), _type, count)
+	DebugPrintf(MODULE_NAME_TICKERS, LOG_LEVEL_ALWAYS, "[%s]Complete to load trades to memory using updateTickerByType(%s), %d items loaded.\n", time.Now().In(loc).Format("2006-01-02T15:04:05Z07:00"), _type, count)
 
 	TimeDot2 := time.Now().UnixNano()
 	fmt.Printf("[Ticker Engine]: "+
@@ -1110,7 +1112,7 @@ func (t *TickerPool) ConstructTickersFromHistoryTradesByTickerType(_type TickerT
 		count,
 		float64(TimeDot2-TimeDot1)/float64(1*time.Second),
 	)
-	DebugPrintf(MODULE_NAME, LOG_LEVEL_ALWAYS, "[Ticker Engine]: "+
+	DebugPrintf(MODULE_NAME_TICKERS, LOG_LEVEL_ALWAYS, "[Ticker Engine]: "+
 		`ConstructTickersFromHistoryTrades Symbol(%s) tickers in recent %s (from time: %d)complete, %d items trades used, USE_TIME= %f(second).
 `,
 		t.sym,
@@ -1144,25 +1146,25 @@ func (t *TickerPool) outPutProcess() {
 	for {
 		v, ok = <-t.OutChannel
 		if ok {
-			t.updateTicker(v.askTrade)
+			t.updateTicker(v.AskTrade)
 
 			tradeTime := time.Now().UnixNano()
-			v.bidTrade.TradeTime = tradeTime
-			v.askTrade.TradeTime = tradeTime
+			v.BidTrade.TradeTime = tradeTime
+			v.AskTrade.TradeTime = tradeTime
 
-			t.LatestTrade.AddTrade(v.bidTrade)
-			t.LatestTrade.AddTrade(v.askTrade)
+			t.LatestTrade.AddTrade(v.BidTrade)
+			t.LatestTrade.AddTrade(v.AskTrade)
 
 			DebugPrintf(MODULE_NAME_TICKERS, LOG_LEVEL_TRACK,
 				`------------------------------------>>>>>>>>>>[%s]Ticker Output with Trade:
 	ID: %d, Price: %f, Volume: %f, Amount: %f, TradeTime: %d	
 `,
-				v.askTrade.Symbol,
-				v.askTrade.ID,
-				v.askTrade.Price,
-				v.askTrade.Volume,
-				v.askTrade.Amount,
-				v.askTrade.TradeTime,
+				v.AskTrade.Symbol,
+				v.AskTrade.ID,
+				v.AskTrade.Price,
+				v.AskTrade.Volume,
+				v.AskTrade.Amount,
+				v.AskTrade.TradeTime,
 			)
 
 		} else {
