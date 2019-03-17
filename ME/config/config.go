@@ -113,9 +113,16 @@ type MEConfig struct {
 	MySQL_User_TE string `json:"MySQL_User_TE"`
 	MySQL_Pwd_TE  string `json:"MySQL_Pwd_TE"`
 
+	/// Redis param -------------------
+	Redis_MX_IP   string `json:"Redis_MX_IP"`
+	Redis_MX_Port int64  `json:"Redis_MX_Port"`
+	Redis_MX_Pwd  string `json:"Redis_MX_Pwd"`
+	Redis_MX_Db   int64  `json:"Redis_MX_Db"`
+
 	/// InPool Mode param -------------
-	InPoolMode     string `json:"InPoolMode"` /// block and unblock inputpool mode
-	MatchAlgorithm string `json:"MatchAlgorithm"`
+	InPoolMode string `json:"InPoolMode"` /// block and unblock inputpool mode
+	CoreType   string `json:"CoreType"`
+	Algorithm  string `json:"Algorithm"`
 
 	/// CoinType Map -------------------
 	CoinList []CoinInfo `json:"CoinList"`

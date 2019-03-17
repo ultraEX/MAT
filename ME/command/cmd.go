@@ -400,7 +400,7 @@ func Command(m *markets.Markets) {
 		/// redis test
 		if command == "redis" {
 			fmt.Printf("GetCommand: %s\n", command)
-			use_redis.ReidsGOInstance().TestRedis(param1, param2, param3, param4, param5, param6)
+			use_redis.RedisDbInstance().TestRedis(param1, param2, param3, param4, param5, param6)
 		}
 
 		/// mysql test
@@ -510,6 +510,12 @@ func Command(m *markets.Markets) {
 		redis trade get user id symbol
 		redis trade all
 		redis trade ones user symbol
+		----------------------------------------------------------------------
+		redis zset add key score mem
+		redis zset rm key mem
+		redis zset get key index
+		redis zset gets key start stop
+		redis zset all key
 		----------------------------------------------------------------------
 	[Mysql]
 		Mysql Order Function:

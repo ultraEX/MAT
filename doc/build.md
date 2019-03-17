@@ -160,8 +160,34 @@ ME Core Daemon Manager Tool:
 	* constructtickersfromhistorytradeswithfilter  0  ZEC/BTC,BTC/ETH,AION/ETH,HOT/ETH,SUB/USDT,MTL/BTC,NEO/ETH,NPXS/ETH,STORJ/USDT,LRC/BTC,RDN/ETH,POE/ETH,GVT/BTC,KNC/ETH,KCS/ETH,RHOC/ETH,AE/USDT,DGD/USDT,DROP/USDT,ODE/BTC,HOT/BTC,THETA/BTC,DASH/ETH,BTM/ETH,BRD/USDT,GVT/USDT,BLZ/USDT,TUSD/BTC,NULS/USDT,ENJ/USDT,BCH/BTC,PPT/BTC,MKR/ETH,EBT/ETH,XIN/ETH,MKR/USDT,WICC/USDT,SNT/BTC Iamsuretodoitpleaseaction!
 	
 # Match Core Config:
-	"MatchAlgorithm": "sortslice"
-	"MatchAlgorithm": "heapmap"
+	"CoreType": "TradePool"
+	"CoreType": "MEXCore"
 
+# Match Core Algorithm Config:
+	"Algorithm": "heapmap"
+	"Algorithm": "zset"
 
+# Test Redis itf:
+	redis zset add key score mem
+	redis zset rm key mem
+	redis zset get key index
+	redis zset gets key start stop
+	redis zset all key
+	----------------------------------------------------------------------------
+	redis zset all bid_orders_container
+	redis zset all ask_orders_container
+	----------------------------------------------------------------------------
+	redis zset get bid_orders_container 0
+	redis zset get ask_orders_container 0
+	----------------------------------------------------------------------------
+	redis zset rm bid_orders_container 2291247880764611467
+	redis zset rm ask_orders_container 2291247880764611505
+	----------------------------------------------------------------------------
+	redis zset add bid_orders_container 0.1 123
+	redis zset add bid_orders_container 1.1 223
+	redis zset add bid_orders_container 2.1 323
+	redis zset add bid_orders_container 3.1 423
+	----------------------------------------------------------------------------
 
+	redis zset all bid_orders_container
+	redis zset all ask_orders_container

@@ -2,7 +2,6 @@ package chansIO
 
 import (
 	"fmt"
-	"sync"
 
 	"../../comm"
 )
@@ -78,7 +77,7 @@ type ChanProcess_In func(int)
 type MultiChans_In struct {
 	chans      [IN_MULTI_CHANS_SIZE]*ChanUnit_In
 	proc       ChanProcess_In
-	chanUse    *ChannelUse_Out
+	chanUse    *ChannelUse
 	idleChanNO int
 }
 
@@ -88,7 +87,7 @@ func NewMultiChans_In(p ChanProcess_In) *MultiChans_In {
 		o.chans[i] = NewChanUnit_In(i)
 	}
 	o.proc = p
-	o.chanUse = NewChannelUse_Out()
+	o.chanUse = NewChannelUse()
 	/// prepare to work
 
 	/// start work
@@ -111,7 +110,7 @@ func (t *MultiChans_In) InChannel(elem *InElem) {
 			t.chanUse.InChan(id, v)
 			t.chans[v].In(elem)
 		}
-		comm.DebugPrintf(MODULE_NAME_MULTICHANS, comm.LOG_LEVEL_TRACK, "MultiChans_In InElemType_EnOrder InChannel(%v).\n", chSet)
+		comm.DebugPrintf(MODULE_NAME_MULTICHANS_IN, comm.LOG_LEVEL_TRACK, "MultiChans_In InElemType_EnOrder InChannel(%v).\n", chSet)
 
 	case InElemType_CancelID:
 		id := elem.CancelId
@@ -121,7 +120,7 @@ func (t *MultiChans_In) InChannel(elem *InElem) {
 			t.chanUse.InChan(id, v)
 			t.chans[v].In(elem)
 		}
-		comm.DebugPrintf(MODULE_NAME_MULTICHANS, comm.LOG_LEVEL_TRACK, "MultiChans_In InElemType_CancelID InChannel(%v).\n", chSet)
+		comm.DebugPrintf(MODULE_NAME_MULTICHANS_IN, comm.LOG_LEVEL_TRACK, "MultiChans_In InElemType_CancelID InChannel(%v).\n", chSet)
 	}
 }
 
@@ -133,21 +132,21 @@ func (t *MultiChans_In) OutChannel(chNO int) (*InElem, bool) {
 	switch elem.Type_ {
 	case InElemType_EnOrder:
 		t.chanUse.OutChan(elem.Order.ID, chNO)
-		comm.DebugPrintf(MODULE_NAME_MULTICHANS, comm.LOG_LEVEL_TRACK,
+		comm.DebugPrintf(MODULE_NAME_MULTICHANS_IN, comm.LOG_LEVEL_TRACK,
 			"MultiChans_In InElemType_EnOrder OutChannel(%d): OutChan(ask(id=%d),bid(id=%d), chanNO=%d.\n",
 			chNO, elem.Order.ID, elem.Order.ID, chNO)
 	case InElemType_CancelID:
 		t.chanUse.OutChan(elem.CancelId, chNO)
-		comm.DebugPrintf(MODULE_NAME_MULTICHANS, comm.LOG_LEVEL_TRACK,
+		comm.DebugPrintf(MODULE_NAME_MULTICHANS_IN, comm.LOG_LEVEL_TRACK,
 			"MultiChans_In OUTPOOL_CANCELORDER OutChannel(%d): OutChan(cancel order(id=%d), chanNO=%d.\n",
 			chNO, elem.CancelId, chNO)
 	}
 
 	if elem.Count <= 0 {
-		comm.DebugPrintf(MODULE_NAME_MULTICHANS, comm.LOG_LEVEL_TRACK, "MultiChans_In OutChannel(%d): %v.\n", chNO, elem)
+		comm.DebugPrintf(MODULE_NAME_MULTICHANS_IN, comm.LOG_LEVEL_TRACK, "MultiChans_In OutChannel(%d): %v.\n", chNO, elem)
 		return elem, true
 	} else {
-		comm.DebugPrintf(MODULE_NAME_MULTICHANS, comm.LOG_LEVEL_TRACK, "MultiChans_In OutChannel(%d) nil.\n", chNO)
+		comm.DebugPrintf(MODULE_NAME_MULTICHANS_IN, comm.LOG_LEVEL_TRACK, "MultiChans_In OutChannel(%d) nil.\n", chNO)
 		return nil, false
 	}
 
@@ -184,15 +183,7 @@ func (t *MultiChans_In) ChanCap() int {
 func (t *MultiChans_In) GetIdleChannel(id int64) []int {
 	/// if a secondary commer, use the original channel to ensure serialize
 	if chans, ok := t.chanUse.GetChan(id); ok {
-		cs := chans.(*sync.Map)
-		var chSet []int
-		// for k, _ := range chans {
-		cs.Range(func(k, v interface{}) bool {
-			chSet = append(chSet, v.(int))
-			return true
-		})
-
-		return chSet
+		return chans
 	}
 
 	/// if a new commer

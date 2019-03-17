@@ -66,8 +66,8 @@ func testEnOrder(client *rpc_order.IOrderClient) {
 					Aorb:   rpc_order.TradeType_BID,
 					Who:    strconv.FormatInt(int64(userID), 10),
 					Symbol: "BTC/ETH",
-					Price:  1.2,
-					Volume: 3.5,
+					Price:  1.2, //+ float64(rand.Intn(10))/10,
+					Volume: 3.5, //+ float64(rand.Intn(10))/10,
 					Fee:    0.001,
 					IpAddr: "thrift go test",
 				}
@@ -99,8 +99,8 @@ func testEnOrder(client *rpc_order.IOrderClient) {
 					Aorb:   rpc_order.TradeType_ASK,
 					Who:    strconv.FormatInt(int64(userID+1), 10),
 					Symbol: "BTC/ETH",
-					Price:  1.2,
-					Volume: 3.5,
+					Price:  1.2, //+ float64(rand.Intn(10))/10,
+					Volume: 3.5, //+ float64(rand.Intn(10))/10,
 					Fee:    0.001,
 					IpAddr: "thrift go test",
 				}

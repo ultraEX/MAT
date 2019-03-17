@@ -148,9 +148,7 @@ func (p *IOrderHandler) EnOrder(ctx context.Context, order *rpc_order.Order) (r 
 		if err != nil {
 			DebugPrintln(rpc_order.MODULE_NAME, LOG_LEVEL_ALWAYS, err)
 			if errCode == use_mysql.ErrorCode_DupPrimateKey {
-				DebugPrintf(rpc_order.MODULE_NAME, LOG_LEVEL_FATAL, "EnOrder fail, Retry to do it once more.\n")
 				panic(fmt.Errorf("duplicate order id should not occur, please check it !!!"))
-
 			} else if errCode == use_mysql.ErrorCode_FundNoEnough {
 				return &rpc_order.ReturnInfo{Status: rpc_order.RetunStatus_FAIL, Info: "EnOrder fail. Fund not enough.", Order: nil}, err
 			} else {

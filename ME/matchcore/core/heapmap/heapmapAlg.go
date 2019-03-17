@@ -10,13 +10,13 @@ import (
 
 ///------------------------------------------------------------------
 type TradeContainer struct {
-	IDOrderMap
+	comm.IDOrderMap
 	TradePrices
 }
 
 func NewTradeContainer() *TradeContainer {
 	o := new(TradeContainer)
-	o.IDOrderMap = *NewIDOrderMap()
+	o.IDOrderMap = *comm.NewIDOrderMap()
 	o.TradePrices = *NewTradePrices()
 	return o
 }
@@ -72,11 +72,15 @@ func (t *TradeContainer) Dump() {
 	fmt.Printf("===================================================================\n")
 }
 
-func (t *TradeContainer) Size() (bidLen, askLen int) {
-	return t.TradePrices.BidPrices.Size(), t.TradePrices.AskPrices.Size()
+func (t *TradeContainer) BidSize() int64 {
+	return t.TradePrices.BidPrices.Size()
 }
 
-func (t *TradeContainer) TheSize() int {
+func (t *TradeContainer) AskSize() int64 {
+	return t.TradePrices.AskPrices.Size()
+}
+
+func (t *TradeContainer) TheSize() int64 {
 	return t.IDOrderMap.Len()
 }
 
@@ -90,7 +94,7 @@ func (t *AscPriceHeap) Len() int {
 }
 
 func (t *AscPriceHeap) Less(i, j int) bool {
-	return t.orders[i] < t.orders[j]
+	return t.orders[i] > t.orders[j]
 }
 
 func (t *AscPriceHeap) Swap(i, j int) {
@@ -114,7 +118,7 @@ func (t *AscPriceHeap) GetTop() (ret interface{}) {
 	if l == 0 {
 		return nil
 	} else {
-		return t.orders[l-1]
+		return t.orders[0]
 	}
 }
 
@@ -164,7 +168,8 @@ func (t *BidPrices) Pop() (order *comm.Order) {
 		}
 		return order
 	} else {
-		panic(fmt.Errorf("BidPrices Pop order with price(%f) fail, logic error!", price))
+		t.Dump()
+		panic(fmt.Errorf("BidPrices Pop order with price(%.18f) fail, logic error!", price))
 	}
 }
 
@@ -187,7 +192,7 @@ func (t *BidPrices) Len() int {
 	return t.bids.Len()
 }
 
-func (t *BidPrices) Size() int {
+func (t *BidPrices) Size() int64 {
 	return t.PriceTimeMap.Size()
 }
 
@@ -195,7 +200,7 @@ func (t *BidPrices) Dump() {
 	fmt.Printf("======================Dump BidPrices==========================\n")
 	fmt.Printf("bids len = %d\n", t.bids.Len())
 	for c, price := range t.bids.orders {
-		fmt.Printf("[%d] price = %f;\n", c, price)
+		fmt.Printf("[%d] price = %.8f;\n", c, price)
 	}
 	t.PriceTimeMap.Dump()
 	fmt.Printf("===================================================================\n")
@@ -211,7 +216,7 @@ func (t *DesPriceHeap) Len() int {
 }
 
 func (t *DesPriceHeap) Less(i, j int) bool {
-	return t.orders[i] > t.orders[j]
+	return t.orders[i] < t.orders[j]
 }
 
 func (t *DesPriceHeap) Swap(i, j int) {
@@ -235,7 +240,7 @@ func (t *DesPriceHeap) GetTop() (ret interface{}) {
 	if l == 0 {
 		return nil
 	} else {
-		return t.orders[l-1]
+		return t.orders[0]
 	}
 }
 
@@ -285,7 +290,8 @@ func (t *AskPrices) Pop() (order *comm.Order) {
 		}
 		return order
 	} else {
-		panic(fmt.Errorf("AskPrices Pop order with price(%f) fail, logic error!", price))
+		t.Dump()
+		panic(fmt.Errorf("AskPrices Pop order with price(%.18f) fail, logic error!", price))
 	}
 }
 
@@ -308,7 +314,7 @@ func (t *AskPrices) Len() int {
 	return t.asks.Len()
 }
 
-func (t *AskPrices) Size() int {
+func (t *AskPrices) Size() int64 {
 	return t.PriceTimeMap.Size()
 }
 
@@ -316,7 +322,7 @@ func (t *AskPrices) Dump() {
 	fmt.Printf("======================Dump AskPrices==========================\n")
 	fmt.Printf("asks len = %d\n", t.asks.Len())
 	for c, price := range t.asks.orders {
-		fmt.Printf("[%d] price = %f;\n", c, price)
+		fmt.Printf("[%d] price = %.8f;\n", c, price)
 	}
 	t.PriceTimeMap.Dump()
 	fmt.Printf("===================================================================\n")
@@ -403,8 +409,8 @@ func (t *OrdersByTime) Pop() (order *comm.Order) {
 	return
 }
 
-func (t *OrdersByTime) Len() int {
-	return t.orders.Len()
+func (t *OrdersByTime) Len() int64 {
+	return int64(t.orders.Len())
 }
 
 func (t *OrdersByTime) GetTop() *comm.Order {
@@ -413,107 +419,70 @@ func (t *OrdersByTime) GetTop() *comm.Order {
 
 ///------------------------------------------------------------------
 type PriceTimeMap struct {
-	m map[float64]*OrdersByTime
+	// m map[float64]*OrdersByTime
+	m sync.Map
 }
 
 func NewPriceTimeMap() *PriceTimeMap {
 	o := new(PriceTimeMap)
-	o.m = make(map[float64]*OrdersByTime)
+	// o.m = make(map[float64]*OrdersByTime)
 	return o
 }
 
 func (t *PriceTimeMap) Set(price float64, orders *OrdersByTime) {
-	t.m[price] = orders
+	// t.m[price] = orders
+	t.m.Store(price, orders)
 }
 
 func (t *PriceTimeMap) Get(price float64) (orders *OrdersByTime, ok bool) {
-	orders, ok = t.m[price]
-	return
+	// orders, ok = t.m[price]
+	if ordersItf, ok := t.m.Load(price); ok {
+		return ordersItf.(*OrdersByTime), ok
+	} else {
+		return nil, ok
+	}
 }
 
 func (t *PriceTimeMap) Remove(price float64) {
-	delete(t.m, price)
+	// delete(t.m, price)
+	t.m.Delete(price)
 }
 
-func (t *PriceTimeMap) Len() int {
-	return len(t.m)
+func (t *PriceTimeMap) Len() int64 {
+	// return len(t.m)
+	return comm.LenOfSyncMap(&t.m)
 }
 
-func (t *PriceTimeMap) Size() int {
-	size := 0
-	for _, orders := range t.m {
-		size += orders.Len()
-	}
+func (t *PriceTimeMap) Size() int64 {
+	var size int64 = 0
+	// for _, orders := range t.m {
+	// 	size += orders.Len()
+	// }
+	t.m.Range(func(price, orders interface{}) bool {
+		size += orders.(*OrdersByTime).Len()
+		return true
+	})
 	return size
 }
 
 func (t *PriceTimeMap) Dump() {
 	fmt.Printf("======================Dump PriceTimeMap==========================\n")
 	fmt.Printf("PriceTimeMap len = %d\n", t.Len())
-	for price, orders := range t.m {
-		fmt.Printf("price = %f, orders = %v;\n", price, orders)
-	}
-	fmt.Printf("===================================================================\n")
-}
-
-///------------------------------------------------------------------
-type IDOrderMap struct {
-	// m map[int64]*comm.Order
-	m sync.Map
-}
-
-func NewIDOrderMap() *IDOrderMap {
-	o := new(IDOrderMap)
-	// o.m = make(map[int64]*comm.Order)
-	return o
-}
-
-func (t *IDOrderMap) Set(id int64, value *comm.Order) {
-	// t.m[id] = value
-	t.m.Store(id, value)
-}
-
-func (t *IDOrderMap) Get(id int64) (*comm.Order, bool) {
-	// orders, ok = t.m[id]
-
-	if orderItf, ok := t.m.Load(id); ok {
-		return orderItf.(*comm.Order), ok
-	} else {
-		return nil, ok
-	}
-}
-
-func (t *IDOrderMap) Remove(id int64) {
-	// delete(t.m, id)
-	t.m.Delete(id)
-}
-
-func (t *IDOrderMap) Len() int {
-	// return len(t.m)
-	return comm.LenOfSyncMap(&t.m)
-}
-
-func (t *IDOrderMap) Dump() {
-	fmt.Printf("======================Dump IDOrderMap==========================\n")
-	fmt.Printf("len = %d\n", t.Len())
-	// for _, order := range t.m {
-	// 	fmt.Printf("id = %d, type = %s, price = %f, volume = %f, time = %d;\n",
-	// 		order.ID,
-	// 		order.AorB,
-	// 		order.Price,
-	// 		order.Volume,
-	// 		order.Timestamp,
-	// 	)
+	// for price, orders := range t.m {
+	// 	fmt.Printf("price = %f, orders = %v;\n", price, orders)
 	// }
-	t.m.Range(func(id, order interface{}) bool {
-		fmt.Printf("[%d]: id = %d, type = %s, price = %f, volume = %f, time = %d;\n",
-			id,
-			order.(*comm.Order).ID,
-			order.(*comm.Order).AorB,
-			order.(*comm.Order).Price,
-			order.(*comm.Order).Volume,
-			order.(*comm.Order).Timestamp,
-		)
+	t.m.Range(func(price, ordersItf interface{}) bool {
+		orders := ordersItf.(*OrdersByTime)
+		fmt.Printf("price = %f, orders(len=%d):\n", price, len(orders.orders.orders))
+		for count, order := range orders.orders.orders {
+			fmt.Printf("[%d]: price = %.8f, time = %d, volume = %.8f, totalvolume = %.8f;\n",
+				count,
+				order.Price,
+				order.Timestamp,
+				order.Volume,
+				order.TotalVolume,
+			)
+		}
 		return true
 	})
 	fmt.Printf("===================================================================\n")

@@ -13,9 +13,15 @@
 	"MySQL_PORT_TE": 3306,
 	"MySQL_User_TE": "root",
 	"MySQL_Pwd_TE": "root",
+	
+	"Redis_MX_IP": "localhost",
+	"Redis_MX_Port": 6379,
+	"Redis_MX_Pwd": "",
+	"Redis_MX_Db": 0,
 
 	"InPoolMode": "unblock",
-	"MatchAlgorithm": "heapmap",
+	"CoreType": "MEXCore",
+	"Algorithm": "zset",
 	"CoinList": [
 		{
 			"Mark": "Invalid",

@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"sync/atomic"
 	"time"
 
 	"../../comm"
@@ -26,16 +27,16 @@ func NewDebugUnit() *DebugUnit {
 }
 
 func (t *DebugUnit) AddTimesInc() {
-	t.addTimes++
+	atomic.AddInt64(&t.addTimes, 1)
 }
 func (t *DebugUnit) QuickAddTimesInc() {
-	t.quickAddTimes++
+	atomic.AddInt64(&t.quickAddTimes, 1)
 }
 func (t *DebugUnit) TradeOutputTimesInc() {
-	t.tradeOutputTimes++
+	atomic.AddInt64(&t.tradeOutputTimes, 1)
 }
 func (t *DebugUnit) TradeCompleteTimesInc() {
-	t.tradeCompleteTimes++
+	atomic.AddInt64(&t.tradeCompleteTimes, 1)
 }
 func (t *DebugUnit) Reset() {
 	t.addTimes = 0

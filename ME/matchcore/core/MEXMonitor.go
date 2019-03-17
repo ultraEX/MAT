@@ -17,7 +17,7 @@ func (t *MEXCore) DumpTradePoolPrint(detail bool) {
 	loc, _ := time.LoadLocation("Local")
 	fmt.Printf("Date Time: %s\n", time.Now().In(loc).Format(formate))
 
-	t.TradeContainer.Dump()
+	t.OrderContainerItf.Dump()
 
 	fmt.Printf("=============================================================\n")
 }
@@ -64,9 +64,8 @@ func (t *MEXCore) Statics() string {
 	fmt.Printf("TRADE OUTPUTS	: %d\n", t.DebugInfo_GetTradeOutputs())
 	fmt.Printf("TRADE COMPLETES	: %d\n", t.DebugInfo_GetTradeCompletes())
 	fmt.Printf("----------------------------------------------------------\n")
-	bidLen, askLen := t.TradeContainer.Size()
-	fmt.Printf("Ask Pool Scale	:	%d\n", bidLen)
-	fmt.Printf("Bid Pool Scale	:	%d\n", askLen)
+	fmt.Printf("Ask Pool Scale	:	%d\n", t.OrderContainerItf.AskSize())
+	fmt.Printf("Bid Pool Scale	:	%d\n", t.OrderContainerItf.BidSize())
 	fmt.Printf("Newest Price	:	%f\n", t.latestPrice)
 	fmt.Printf("----------------------------------------------------------\n")
 	fmt.Printf("=====================[Trade Statics]=====================\n")
@@ -110,19 +109,17 @@ func (t *MEXCore) TradeCommand(u string, p ...interface{}) {
 }
 
 func (t *MEXCore) GetTradeCompleteRate() float64 {
-	return -1
+	return t.DebugInfo_GetTradeCompleteRate()
 }
 
 func (t *MEXCore) GetAskPoolLen() int {
-	_, askLen := t.TradeContainer.Size()
-	return askLen
+	return int(t.OrderContainerItf.AskSize())
 }
 
 func (t *MEXCore) GetBidPoolLen() int {
-	bidLen, _ := t.TradeContainer.Size()
-	return bidLen
+	return int(t.OrderContainerItf.BidSize())
 }
 
 func (t *MEXCore) GetPoolLen() int {
-	return t.TradeContainer.TheSize()
+	return int(t.OrderContainerItf.TheSize())
 }

@@ -635,8 +635,8 @@ func GetNecoLog() bool {
 	return NECO_LOG_SWITCH
 }
 
-func LenOfSyncMap(m *sync.Map) int {
-	c := 0
+func LenOfSyncMap(m *sync.Map) int64 {
+	var c int64 = 0
 	m.Range(func(k, v interface{}) bool {
 		c++
 		return true

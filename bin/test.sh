@@ -16,9 +16,9 @@ function testThriftConcurrency()
 {
 	echo -e "Begin to test Thrift Concurrency..."
 
-    for ((i=0; i<10; i++))
+    for ((i=0; i<3; i++))
     do
-        let alpha=800
+        let alpha=160
         let startID=i*alpha
         let endID=(i+1)*alpha 
         ./Tcli  -startid=$startID -endid=$endID & 

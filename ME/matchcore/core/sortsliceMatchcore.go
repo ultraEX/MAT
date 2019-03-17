@@ -722,10 +722,12 @@ func (t *TradePool) Statics() string {
 	strBuff = fmt.Sprintf(strBuff+"InChannel Pool Cap	:	%d\n", INCHANNEL_BUFF_SIZE*INCHANNEL_POOL_SIZE) ///(total buff size)
 	strBuff = fmt.Sprintf(strBuff+"InChannel Pool Len	:	%d\n", t.InChannel.Len())                       ///(buff total usage)
 	strBuff = fmt.Sprintf(strBuff+"InChannel Pool Current Channel:	%d\n", t.InChannel.GetChannel())     ///(order output serialize map scale)
+
 	strBuff = fmt.Sprintf(strBuff + "----------------------------------------------------------\n")
 	strBuff = fmt.Sprintf(strBuff + "----------------------------------------------------------\n")
 	strBuff = fmt.Sprintf(strBuff+"MultiChansOut Status	:	Pool size = %d\n", t.MultiChanOut.Len())
 	strBuff = fmt.Sprintf(strBuff+"MultiChansOut Status	:	Chan size = %d\n", t.MultiChanOut.ChanCap())
+	t.MultiChanOut.Summary()
 	IDs, CHs, chnums := t.MultiChanOut.GetChanUseStatus()
 	strBuff = fmt.Sprintf(strBuff+"MultiChansOut Chans Usage status: %d; %d; %d\n", IDs, CHs, chnums)
 

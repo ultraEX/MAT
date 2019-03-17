@@ -3,15 +3,14 @@ package chansIO
 
 import (
 	"fmt"
-	"sync"
 
 	"../../comm"
 )
 
 const (
-	MODULE_NAME_MULTICHANS string = "[MultiChans]: "
-	OUT_MULTI_CHANS_SIZE   int    = 10
-	OUT_CHANNEL_SIZE       int    = 68
+	MODULE_NAME_MULTICHANS_OUT string = "[MultiChans]: "
+	OUT_MULTI_CHANS_SIZE       int    = 10
+	OUT_CHANNEL_SIZE           int    = 68
 )
 
 var (
@@ -62,7 +61,7 @@ type ChanProcess_Out func(int)
 type MultiChans_Out struct {
 	chans      [OUT_MULTI_CHANS_SIZE]*ChanUnit_Out
 	proc       ChanProcess_Out
-	chanUse    *ChannelUse_Out
+	chanUse    *ChannelUse
 	idleChanNO int
 }
 
@@ -72,7 +71,7 @@ func NewMultiChans_Out(p ChanProcess_Out) *MultiChans_Out {
 		o.chans[i] = NewChanUnit_Out(i)
 	}
 	o.proc = p
-	o.chanUse = NewChannelUse_Out()
+	o.chanUse = NewChannelUse()
 	/// prepare to work
 
 	/// start work
@@ -97,7 +96,7 @@ func (t *MultiChans_Out) InChannel(elem *OutElem) {
 			t.chanUse.InChan(bidID, v)
 			t.chans[v].In(elem)
 		}
-		comm.DebugPrintf(MODULE_NAME_MULTICHANS, comm.LOG_LEVEL_TRACK, "MultiChans_Out OUTPOOL_MATCHTRADE InChannel(%v).\n", chSet)
+		comm.DebugPrintf(MODULE_NAME_MULTICHANS_OUT, comm.LOG_LEVEL_TRACK, "MultiChans_Out OUTPOOL_MATCHTRADE InChannel(%v).\n", chSet)
 
 	case OUTPOOL_CANCELORDER:
 		id := elem.CancelOrder.Order.ID
@@ -107,7 +106,7 @@ func (t *MultiChans_Out) InChannel(elem *OutElem) {
 			t.chanUse.InChan(id, v)
 			t.chans[v].In(elem)
 		}
-		comm.DebugPrintf(MODULE_NAME_MULTICHANS, comm.LOG_LEVEL_TRACK, "MultiChans_Out OUTPOOL_CANCELORDER InChannel(%v).\n", chSet)
+		comm.DebugPrintf(MODULE_NAME_MULTICHANS_OUT, comm.LOG_LEVEL_TRACK, "MultiChans_Out OUTPOOL_CANCELORDER InChannel(%v).\n", chSet)
 	}
 }
 
@@ -120,21 +119,21 @@ func (t *MultiChans_Out) OutChannel(chNO int) (*OutElem, bool) {
 	case OUTPOOL_MATCHTRADE:
 		t.chanUse.OutChan(elem.Trade.AskTrade.ID, chNO)
 		t.chanUse.OutChan(elem.Trade.BidTrade.ID, chNO)
-		comm.DebugPrintf(MODULE_NAME_MULTICHANS, comm.LOG_LEVEL_TRACK,
+		comm.DebugPrintf(MODULE_NAME_MULTICHANS_OUT, comm.LOG_LEVEL_TRACK,
 			"MultiChans_Out OUTPOOL_MATCHTRADE OutChannel(%d): OutChan(ask(id=%d),bid(id=%d), chanNO=%d.\n",
 			chNO, elem.Trade.AskTrade.ID, elem.Trade.BidTrade.ID, chNO)
 	case OUTPOOL_CANCELORDER:
 		t.chanUse.OutChan(elem.CancelOrder.Order.ID, chNO)
-		comm.DebugPrintf(MODULE_NAME_MULTICHANS, comm.LOG_LEVEL_TRACK,
+		comm.DebugPrintf(MODULE_NAME_MULTICHANS_OUT, comm.LOG_LEVEL_TRACK,
 			"MultiChans_Out OUTPOOL_CANCELORDER OutChannel(%d): OutChan(cancel order(id=%d), chanNO=%d.\n",
 			chNO, elem.CancelOrder.Order.ID, chNO)
 	}
 
 	if elem.Count <= 0 {
-		comm.DebugPrintf(MODULE_NAME_MULTICHANS, comm.LOG_LEVEL_TRACK, "MultiChans_Out OutChannel(%d): %v.\n", chNO, elem)
+		comm.DebugPrintf(MODULE_NAME_MULTICHANS_OUT, comm.LOG_LEVEL_TRACK, "MultiChans_Out OutChannel(%d): %v.\n", chNO, elem)
 		return elem, true
 	} else {
-		comm.DebugPrintf(MODULE_NAME_MULTICHANS, comm.LOG_LEVEL_TRACK, "MultiChans_Out OutChannel(%d) nil.\n", chNO)
+		comm.DebugPrintf(MODULE_NAME_MULTICHANS_OUT, comm.LOG_LEVEL_TRACK, "MultiChans_Out OutChannel(%d) nil.\n", chNO)
 		return nil, false
 	}
 
@@ -179,20 +178,10 @@ func (t *MultiChans_Out) GetIdleChannel_Trade(askID int64, bidID int64) []int {
 	bidCh, okBid := t.chanUse.GetChan(bidID)
 	var chSet []int
 	if okAsk {
-		cs := askCh.(*sync.Map)
-		// for k, _ := range askCh {
-		cs.Range(func(k, v interface{}) bool {
-			chSet = append(chSet, k.(int))
-			return true
-		})
-
+		chSet = append(chSet, askCh...)
 	}
 	if okBid {
-		cs := bidCh.(*sync.Map)
-		cs.Range(func(k, v interface{}) bool {
-			chSet = append(chSet, k.(int))
-			return true
-		})
+		chSet = append(chSet, bidCh...)
 	}
 	if okAsk || okBid {
 		return chSet
@@ -224,15 +213,7 @@ func (t *MultiChans_Out) GetIdleChannel_Trade(askID int64, bidID int64) []int {
 func (t *MultiChans_Out) GetIdleChannel_Cancel(id int64) []int {
 	/// if a secondary commer, use the original channel to ensure serialize
 	if chans, ok := t.chanUse.GetChan(id); ok {
-		cs := chans.(*sync.Map)
-		var chSet []int
-		// for k, _ := range chans {
-		cs.Range(func(k, v interface{}) bool {
-			chSet = append(chSet, v.(int))
-			return true
-		})
-
-		return chSet
+		return chans
 	}
 
 	/// if a new commer
