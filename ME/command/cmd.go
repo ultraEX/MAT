@@ -160,8 +160,10 @@ func Command(m *markets.Markets) {
 			fmt.Printf("GetCommand: %s %s\n", command, param1)
 			if param1 == "true" {
 				SetDbThroughpass(true)
+				fmt.Printf("DB passed through\n")
 			} else {
 				SetDbThroughpass(false)
+				fmt.Printf("DB not passed through\n")
 			}
 
 		}
@@ -512,6 +514,7 @@ func Command(m *markets.Markets) {
 		redis trade ones user symbol
 		----------------------------------------------------------------------
 		redis zset add key score mem
+		redis zset addforindex key score mem
 		redis zset rm key mem
 		redis zset get key index
 		redis zset gets key start stop

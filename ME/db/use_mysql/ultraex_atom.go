@@ -176,9 +176,9 @@ retry:
 	trade := Trade{*order, 0, 0, 0}
 	switch order.AorB {
 	case TradeType_BID:
-		trade.Amount = trade.TotalVolume - trade.Volume
+		trade.Amount = trade.Volume
 	case TradeType_ASK:
-		trade.Amount = trade.Price * (trade.TotalVolume - trade.Volume)
+		trade.Amount = trade.Price * (trade.Volume)
 	default:
 		panic(fmt.Errorf("CancelOrder input order tradetype error!"))
 	}
@@ -189,9 +189,8 @@ retry:
 	} else {
 		trade.Status = ORDER_PARTIAL_CANCEL
 	}
-	trade.Volume = trade.TotalVolume - trade.Volume
 	if trade.Volume != 0 {
-		err = t.AddTrade(&trade, tx)
+		err = t.InsertTrade(&trade, tx)
 		if err != nil {
 			panic(err)
 		}
@@ -253,23 +252,35 @@ retry:
 	/// ask or bid filled -> eighter to record trade and remove from order table
 	if bidTrade.Status == ORDER_FILLED && askTrade.Status == ORDER_FILLED {
 		/// To record TradeMatch info to Mysql database: Trade table
-		err = t.AddTradeCouple(bidTrade, askTrade, tx)
+		err = t.InsertTradeCouple(bidTrade, askTrade, tx)
 		if err != nil {
 			panic(err)
 		}
 
 		/// Rm order from Duration Storage: clear the orders in the order table
-		err = t.RmOrderCouple(&bidTrade.Order, &askTrade.Order, tx)
+		// err = t.RmOrderCouple(&bidTrade.Order, &askTrade.Order, tx)
+		// if err != nil {
+		// 	panic(err)
+		// }
+		err = t.UpdateOrder(&bidTrade.Order, tx)
+		if err != nil {
+			panic(err)
+		}
+		err = t.UpdateOrder(&askTrade.Order, tx)
 		if err != nil {
 			panic(err)
 		}
 	} else if bidTrade.Status == ORDER_FILLED {
 		/// bid complete
-		err = t.AddTrade(bidTrade, tx)
+		err = t.InsertTrade(bidTrade, tx)
 		if err != nil {
 			panic(err)
 		}
-		err = t.RmOrder(bidTrade.Who, bidTrade.ID, bidTrade.Symbol, tx)
+		// err = t.RmOrder(bidTrade.Who, bidTrade.ID, bidTrade.Symbol, tx)
+		// if err != nil {
+		// 	panic(err)
+		// }
+		err = t.UpdateOrder(&bidTrade.Order, tx)
 		if err != nil {
 			panic(err)
 		}
@@ -279,17 +290,21 @@ retry:
 		if err != nil {
 			panic(err)
 		}
-		err = t.AddTrade(askTrade, tx)
+		err = t.InsertTrade(askTrade, tx)
 		if err != nil {
 			panic(err)
 		}
 	} else if askTrade.Status == ORDER_FILLED {
 		/// ask complete
-		err = t.AddTrade(askTrade, tx)
+		err = t.InsertTrade(askTrade, tx)
 		if err != nil {
 			panic(err)
 		}
-		err = t.RmOrder(askTrade.Who, askTrade.ID, askTrade.Symbol, tx)
+		// err = t.RmOrder(askTrade.Who, askTrade.ID, askTrade.Symbol, tx)
+		// if err != nil {
+		// 	panic(err)
+		// }
+		err = t.UpdateOrder(&askTrade.Order, tx)
 		if err != nil {
 			panic(err)
 		}
@@ -299,7 +314,7 @@ retry:
 		if err != nil {
 			panic(err)
 		}
-		err = t.AddTrade(bidTrade, tx)
+		err = t.InsertTrade(bidTrade, tx)
 		if err != nil {
 			panic(err)
 		}

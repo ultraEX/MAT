@@ -1,5 +1,5 @@
 {
-	"CommandRPCIPPort": "localhost:7391",
+	"CommandRPCIPPort": ":7391",
 	"ManagerRPCIPPort": "localhost:1937",
 	"JsonRPCIPPort": "localhost:7392",
 	"RESTfulIPPort": "localhost:7933",

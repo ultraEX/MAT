@@ -15,10 +15,12 @@ import (
 	rt "../runtime"
 	hm "./heapmap"
 	zs "./zset"
+	zc "./zsetcluster"
 )
 
 const (
-	MODULE_NAME_HEAPMAP string = "[MatchCore-Heapmap]: "
+	MODULE_NAME_MEXCORE   string = "[MatchCore]: "
+	MXECORE_GOROUTINE_NUM        = 10
 )
 
 type MECoreInfo struct {
@@ -37,7 +39,7 @@ type MEXCore struct {
 	comm.OrderContainerItf
 
 	chs.MultiChans_In
-	chs.MultiChans_Out
+	MultiChans_Out chs.MultiChans_OutGo
 
 	MECoreInfo
 	rt.DebugInfo
@@ -51,12 +53,16 @@ func NewMEXCore(sym string, mt config.MarketType, conf *config.MarketConfig, te 
 
 	if config.GetMEConfig().Algorithm == "heapmap" {
 		o.OrderContainerItf = hm.NewTradeContainer()
-	} else {
+	} else if config.GetMEConfig().Algorithm == "zset" {
 		o.OrderContainerItf = zs.NewOrderContainer()
+	} else if config.GetMEConfig().Algorithm == "zsetcluster" {
+		o.OrderContainerItf = zc.NewOrderContainer()
+	} else {
+		panic(fmt.Errorf("NewMEXCore.NewMEXCore fail, as Algorithm(%s) not support.", config.GetMEConfig().Algorithm))
 	}
 
 	o.MultiChans_In = *chs.NewMultiChans_In(o.multiChanInProc)
-	o.MultiChans_Out = *chs.NewMultiChans_Out(o.multiChanOutProc)
+	o.MultiChans_Out = *chs.NewMultiChans_OutGo(o.multiChanOutProc)
 
 	o.MECoreInfo = NewMECoreInfo(sym, mt, conf, te)
 	o.DebugInfo = *rt.NewDebugInfo()
@@ -75,7 +81,10 @@ func NewMEXCore(sym string, mt config.MarketType, conf *config.MarketConfig, te 
 	o.OrderID = *rt.NewOrderID((int(vB) & 0x2f) | (int(vQ) & 0x2f))
 
 	/// to improve with match thread pool!!!
-	go o.match()
+	for i := 0; i < MXECORE_GOROUTINE_NUM; i++ {
+		go o.match()
+	}
+
 	go o.initHistoryOrder()
 
 	return o
@@ -98,7 +107,7 @@ func (t *MEXCore) CancelTheOrder(order *comm.Order) error {
 func (t *MEXCore) init(order *comm.Order) error {
 	// to do
 
-	comm.DebugPrintf(MODULE_NAME_HEAPMAP, comm.LOG_LEVEL_TRACK, "init: .\n")
+	comm.DebugPrintf(MODULE_NAME_MEXCORE, comm.LOG_LEVEL_TRACK, "init: .\n")
 	return nil
 }
 
@@ -106,7 +115,7 @@ func (t *MEXCore) init(order *comm.Order) error {
 func (t *MEXCore) enOrder(order *comm.Order) error {
 	t.OrderContainerItf.Push(order)
 
-	comm.DebugPrintf(MODULE_NAME_HEAPMAP, comm.LOG_LEVEL_TRACK, "enOrder: id = %d.\n", order.ID)
+	comm.DebugPrintf(MODULE_NAME_MEXCORE, comm.LOG_LEVEL_TRACK, "enOrder: id = %d.\n", order.ID)
 	return nil
 }
 
@@ -118,7 +127,7 @@ func (t *MEXCore) cancelOrder(id int64) error {
 		t.MultiChans_Out.InChannel(&chs.OutElem{Trade: nil, CancelOrder: &chs.CanceledOrder{Order: order}, Type_: chs.OUTPOOL_CANCELORDER, Count: 0})
 		return nil
 	} else {
-		comm.DebugPrintf(MODULE_NAME_HEAPMAP, comm.LOG_LEVEL_TRACK, "cancelOrder id=%d not in MEXCore.\n", id)
+		comm.DebugPrintf(MODULE_NAME_MEXCORE, comm.LOG_LEVEL_TRACK, "cancelOrder id=%d not in MEXCore.\n", id)
 		return fmt.Errorf("cancelOrder id=%d not in MEXCore, may have traded!", id)
 	}
 }
@@ -126,7 +135,7 @@ func (t *MEXCore) cancelOrder(id int64) error {
 /// Output Process: ----------------------------------------------------------------------------------------
 func (t *MEXCore) matchtradeOutput(bidTrade *comm.Trade, askTrade *comm.Trade) {
 	/// debug:
-	comm.DebugPrintf(MODULE_NAME_HEAPMAP, comm.LOG_LEVEL_TRACK,
+	comm.DebugPrintf(MODULE_NAME_MEXCORE, comm.LOG_LEVEL_TRACK,
 		"%s-%s MatchTrade(bid:%d,ask:%d) Output to channel=======================>>>>>>>>>>\n",
 		t.Symbol, t.MarketType.String(), bidTrade.ID, askTrade.ID)
 
@@ -142,7 +151,7 @@ func (t *MEXCore) matchtradeOutput(bidTrade *comm.Trade, askTrade *comm.Trade) {
 }
 
 func (t *MEXCore) cancelOrderOutput(order *comm.Order) {
-	comm.DebugPrintf(MODULE_NAME_HEAPMAP, comm.LOG_LEVEL_TRACK,
+	comm.DebugPrintf(MODULE_NAME_MEXCORE, comm.LOG_LEVEL_TRACK,
 		"%s-%s CancelOrder(id:%d) Output to channel=======================>>>>>>>>>>\n",
 		t.Symbol, t.MarketType.String(), order.ID)
 
@@ -158,15 +167,15 @@ func (t *MEXCore) multiChanOutProc(chNO int) {
 		v  *chs.OutElem = nil
 		ok bool         = false
 	)
-	defer func() {
-		if err := recover(); err != nil {
-			fmt.Printf("Panic Error Occur at multiChanOutProc chan NO. %d\n", chNO)
-			fmt.Println(err)
-			fmt.Printf("Current MECore Dump:\n")
-			t.OrderContainerItf.Dump()
-		}
-		fmt.Printf("multiChanOutProc chan NO. %d process exited!!!\n", chNO)
-	}()
+	// defer func() {
+	// 	if err := recover(); err != nil {
+	// 		fmt.Printf("Panic Error Occur at multiChanOutProc chan NO. %d\n", chNO)
+	// 		fmt.Println(err)
+	// 		fmt.Printf("Current MECore Dump:\n")
+	// 		t.OrderContainerItf.Dump()
+	// 	}
+	// 	fmt.Printf("multiChanOutProc chan NO. %d process exited!!!\n", chNO)
+	// }()
 
 	for {
 		v, ok = t.MultiChans_Out.OutChannel(chNO)
@@ -190,10 +199,10 @@ func (t *MEXCore) orderInput(order *comm.Order) {
 		if errCode == use_mysql.ErrorCode_DupPrimateKey {
 			panic(fmt.Errorf("MEXCore.orderInput: duplicate order id should not occur, please check it !!!"))
 		} else if errCode == use_mysql.ErrorCode_FundNoEnough {
-			comm.DebugPrintf(MODULE_NAME_HEAPMAP, comm.LOG_LEVEL_ALWAYS, "No enough money, errMsg = %s.\n", err.Error())
+			comm.DebugPrintf(MODULE_NAME_MEXCORE, comm.LOG_LEVEL_ALWAYS, "No enough money, errMsg = %s.\n", err.Error())
 			return
 		} else {
-			comm.DebugPrintf(MODULE_NAME_HEAPMAP, comm.LOG_LEVEL_ALWAYS, "EnOrder fail,  errMsg = %s.\n", err.Error())
+			comm.DebugPrintf(MODULE_NAME_MEXCORE, comm.LOG_LEVEL_ALWAYS, "EnOrder fail,  errMsg = %s.\n", err.Error())
 			return
 		}
 	}
@@ -211,7 +220,7 @@ func (t *MEXCore) orderInput(order *comm.Order) {
 	}
 
 	///debug===
-	comm.DebugPrintf(MODULE_NAME_HEAPMAP, comm.LOG_LEVEL_TRACK,
+	comm.DebugPrintf(MODULE_NAME_MEXCORE, comm.LOG_LEVEL_TRACK,
 		`=======================>>>>>>>>>>%s-%s Order Input
 Order id:%d, user:%s, type:%s, symbol:%s, time:%d, price:%f, volume:%f, tatalVolume:%f, fee:%f
 Get from Inchannel(cap:%d, len:%d)
@@ -246,35 +255,36 @@ func (t *MEXCore) multiChanInProc(chNO int) {
 }
 
 /// Matching: ----------------------------------------------------------------------------------------
-func (t *MEXCore) trade() {
+func (t *MEXCore) inspect() bool {
+	orderBid := t.OrderContainerItf.GetTop(comm.TradeType_BID)
+	orderAsk := t.OrderContainerItf.GetTop(comm.TradeType_ASK)
+	if orderBid != nil && orderAsk != nil {
+		if orderBid.Status == comm.ORDER_CANCELED || orderAsk.Status == comm.ORDER_CANCELED {
+			return true
+		}
+		if orderBid.Price >= orderAsk.Price {
+			return true
+		}
+		return false
+	}
+
+	if orderBid != nil && orderBid.Status == comm.ORDER_CANCELED {
+		return true
+	}
+	if orderAsk != nil && orderAsk.Status == comm.ORDER_CANCELED {
+		return true
+	}
+	return false
+
+}
+
+func (t *MEXCore) deal(orderBid, orderAsk *comm.Order) {
 	var bidStatus, askStatus comm.TradeStatus
-
-	TimeDot1 := time.Now().UnixNano()
-	orderAsk := t.OrderContainerItf.Pop(comm.TradeType_ASK)
-	if orderAsk == nil {
-		return
-	}
-	if orderAsk.Status == comm.ORDER_CANCELED {
-		return
-	}
-
-	orderBid := t.OrderContainerItf.Pop(comm.TradeType_BID)
-	if orderBid == nil {
-		if orderAsk.Status != comm.ORDER_CANCELED {
-			t.OrderContainerItf.Push(orderAsk)
-		}
-		return
-	}
-	if orderBid.Status == comm.ORDER_CANCELED {
-		if orderAsk.Status != comm.ORDER_CANCELED {
-			t.OrderContainerItf.Push(orderAsk)
-		}
-		return
-	}
 
 	if orderValidatable(orderAsk) && orderValidatable(orderBid) {
 		if orderBid.Price >= orderAsk.Price {
-			comm.DebugPrintf(MODULE_NAME_HEAPMAP, comm.LOG_LEVEL_TRACK,
+
+			comm.DebugPrintf(MODULE_NAME_MEXCORE, comm.LOG_LEVEL_TRACK,
 				`=======>>>%s-%s Orders Matching<<<======
 BID order == symbol:%s, id:%d, user:%s, time:%d, price:%f, volume:%f
 ASK order == symbol:%s, id:%d, user:%s, time:%d, price:%f, volume:%f
@@ -347,8 +357,6 @@ ASK order == symbol:%s, id:%d, user:%s, time:%d, price:%f, volume:%f
 			///To do: put to channel to send to database
 			t.MultiChans_Out.InChannel(&chs.OutElem{Trade: &chs.MatchTrade{&tradeBid, &tradeAsk}, CancelOrder: nil, Type_: chs.OUTPOOL_MATCHTRADE, Count: 0})
 
-			TimeDot2 := time.Now().UnixNano()
-			t.DebugInfo_RecordCorePerform(TimeDot2 - TimeDot1)
 		} else {
 			t.OrderContainerItf.Push(orderAsk)
 			t.OrderContainerItf.Push(orderBid)
@@ -360,22 +368,60 @@ ASK order == symbol:%s, id:%d, user:%s, time:%d, price:%f, volume:%f
 	}
 }
 
+func (t *MEXCore) trade() {
+	TimeDot1 := time.Now().UnixNano()
+	defer func() {
+		TimeDot2 := time.Now().UnixNano()
+		t.DebugInfo_RecordCorePerform(TimeDot2 - TimeDot1)
+	}()
+
+	orderBid := t.OrderContainerItf.Pop(comm.TradeType_BID)
+	orderAsk := t.OrderContainerItf.Pop(comm.TradeType_ASK)
+
+	if orderBid != nil && orderAsk != nil {
+		if orderBid.Status != comm.ORDER_CANCELED && orderAsk.Status != comm.ORDER_CANCELED {
+			t.deal(orderBid, orderAsk)
+			return
+		}
+		if orderBid.Status == comm.ORDER_CANCELED {
+			if orderAsk.Status != comm.ORDER_CANCELED {
+				t.OrderContainerItf.Push(orderAsk)
+			}
+			return
+		}
+		if orderAsk.Status == comm.ORDER_CANCELED {
+			if orderBid.Status != comm.ORDER_CANCELED {
+				t.OrderContainerItf.Push(orderBid)
+			}
+			return
+		}
+	}
+
+	if orderBid != nil && orderBid.Status != comm.ORDER_CANCELED {
+		t.OrderContainerItf.Push(orderBid)
+	}
+	if orderAsk != nil && orderAsk.Status != comm.ORDER_CANCELED {
+		t.OrderContainerItf.Push(orderAsk)
+	}
+
+	return
+}
+
 func (t *MEXCore) match() {
 	// to do
 	for {
-
-		/// To match trade and put it out to outchannels
-		t.trade()
+		if t.inspect() {
+			t.trade()
+		}
 
 		time.Sleep(comm.MECORE_MATCH_DURATION)
-		runtime.Gosched()
 	}
 
 }
 
 /// ----------------------------------------------------------------------------------------
 func (t *MEXCore) initHistoryOrder() (size int64, err error) {
-	fmt.Printf("%s: Start to get history orders of %s-%s\n", MODULE_NAME_HEAPMAP, t.Symbol, t.MarketType.String())
+	fmt.Printf("%s: Start to get history orders of %s-%s\n", MODULE_NAME_MEXCORE, t.Symbol, t.MarketType.String())
 	var (
 		hs []*comm.Order
 	)
@@ -395,49 +441,45 @@ func (t *MEXCore) initHistoryOrder() (size int64, err error) {
 		panic(err)
 	}
 	hsSize := len(hs)
-	fmt.Printf("%s: History orders(%s-%s) scale(%d)\n", MODULE_NAME_HEAPMAP, t.Symbol, t.MarketType.String(), hsSize)
+	fmt.Printf("%s: History orders(%s-%s) scale(%d)\n", MODULE_NAME_MEXCORE, t.Symbol, t.MarketType.String(), hsSize)
 
 	/// Put them in ME
-	fmt.Printf("%s: Start to loading orders(%s-%s) to Match Engine...\n", MODULE_NAME_HEAPMAP, t.Symbol, t.MarketType.String())
+	fmt.Printf("%s: Start to loading orders(%s-%s) to Match Engine...\n", MODULE_NAME_MEXCORE, t.Symbol, t.MarketType.String())
 	for count, order := range hs {
 		if order.AorB == comm.TradeType_BID {
-			if order.Status == comm.ORDER_SUBMIT || order.Status == comm.ORDER_PARTIAL_FILLED {
+			if (order.Status == comm.ORDER_SUBMIT || order.Status == comm.ORDER_PARTIAL_FILLED) && order.Volume != 0 {
 				t.OrderContainerItf.Push(order)
 			} else {
-				comm.DebugPrintf(MODULE_NAME_HEAPMAP, comm.LOG_LEVEL_ALWAYS,
+				comm.DebugPrintf(MODULE_NAME_MEXCORE, comm.LOG_LEVEL_ALWAYS,
 					"[InitHistoryOrders]: Market(%s) met illeagal orders with incorrect status in the order duration storage! It should be remove from DS.\n\tOrder info: User(%s), ID(%d), Status(%s)\n",
 					t.Symbol, order.Who, order.ID, order.Status,
 				)
-				panic(fmt.Errorf("[InitHistoryOrders]: Market(%s)  met illeagal orders with incorrect status in the order duration storage! It should be remove from DS.\n\tOrder info: User(%s), ID(%d), Status(%s)\n",
-					t.Symbol, order.Who, order.ID, order.Status))
 			}
 		} else if order.AorB == comm.TradeType_ASK {
-			if order.Status == comm.ORDER_SUBMIT || order.Status == comm.ORDER_PARTIAL_FILLED {
+			if (order.Status == comm.ORDER_SUBMIT || order.Status == comm.ORDER_PARTIAL_FILLED) && order.Volume != 0 {
 				t.OrderContainerItf.Push(order)
 			} else {
-				comm.DebugPrintf(MODULE_NAME_HEAPMAP, comm.LOG_LEVEL_ALWAYS,
+				comm.DebugPrintf(MODULE_NAME_MEXCORE, comm.LOG_LEVEL_ALWAYS,
 					"[InitHistoryOrders]: Market(%s) met illeagal orders with incorrect status in the order duration storage! It should be remove from DS.\n\tOrder info: User(%s), ID(%d), Status(%s)\n",
 					t.Symbol, order.Who, order.ID, order.Status,
 				)
-				panic(fmt.Errorf("[InitHistoryOrders]: Market(%s) met illeagal orders with incorrect status in the order duration storage! It should be remove from DS.\n\tOrder info: User(%s), ID(%d), Status(%s)\n",
-					t.Symbol, order.Who, order.ID, order.Status))
 			}
 		} else {
-			comm.DebugPrintf(MODULE_NAME_HEAPMAP, comm.LOG_LEVEL_ALWAYS, "[InitHistoryOrders]: Market(%s) met illeagal orders with neith bid nor ask order! It would be remove from duration storage.\n", t.Symbol)
+			comm.DebugPrintf(MODULE_NAME_MEXCORE, comm.LOG_LEVEL_ALWAYS, "[InitHistoryOrders]: Market(%s) met illeagal orders with neith bid nor ask order! It would be remove from duration storage.\n", t.Symbol)
 			panic(fmt.Errorf("[InitHistoryOrders]: Market(%s) met illeagal orders with neith bid nor ask order! It would be remove from duration storage.\n", t.Symbol))
 		}
 
 		if count == 0 {
-			fmt.Printf("%s: %s-%s Adding orders: \n", MODULE_NAME_HEAPMAP, t.Symbol, t.MarketType.String())
+			fmt.Printf("%s: %s-%s Adding orders: \n", MODULE_NAME_MEXCORE, t.Symbol, t.MarketType.String())
 		}
 		if count%1000 == 0 && count != 0 {
 			fmt.Printf("+1000..")
 			if count%10000 == 0 {
-				fmt.Printf("\n%sPercent: %f%%\n", MODULE_NAME_HEAPMAP, float64(count+1)*100/float64(hsSize))
+				fmt.Printf("\n%sPercent: %f%%\n", MODULE_NAME_MEXCORE, float64(count+1)*100/float64(hsSize))
 			}
 		}
 	}
-	fmt.Printf("\n%s: Load %s-%s orders complete.\n", MODULE_NAME_HEAPMAP, t.Symbol, t.MarketType.String())
+	fmt.Printf("\n%s: Load %s-%s orders complete.\n", MODULE_NAME_MEXCORE, t.Symbol, t.MarketType.String())
 	return int64(hsSize), nil
 }
 

@@ -24,7 +24,7 @@ type rOrder struct {
 //---------------------------------------------------------------------------------------------------
 /// Use Redis Set to store wait process order list
 /// Use Redis Hash to store order detail info
-func (t *RedisDb) AddOrder(order *Order) error {
+func (t *RedisDb) AddOrderToSet(order *Order) error {
 	/// use Hash to store order detail
 	m := map[string]string{
 		"ID":          strconv.FormatInt(order.ID, 10),
@@ -59,7 +59,30 @@ func (t *RedisDb) AddOrder(order *Order) error {
 	return nil
 }
 
-func (t *RedisDb) RmOrder(user string, id int64, symbol string) error {
+func (t *RedisDb) AddCacheOrderByNamedConn(name string, order *Order) error {
+	/// use Hash to store order detail
+	m := map[string]string{
+		"ID":          strconv.FormatInt(order.ID, 10),
+		"Who":         order.Who,
+		"AorB":        strconv.FormatInt(int64(order.AorB), 10),
+		"Symbol":      order.Symbol,
+		"Timestamp":   strconv.FormatInt(order.Timestamp, 10),
+		"Price":       strconv.FormatFloat(order.Price, 'f', -1, 64),
+		"Volume":      strconv.FormatFloat(order.Volume, 'f', -1, 64),
+		"TotalVolume": strconv.FormatFloat(order.TotalVolume, 'f', -1, 64),
+		"Fee":         strconv.FormatFloat(order.Fee, 'f', -1, 64),
+		"Status":      strconv.FormatInt(int64(order.Status), 10),
+	}
+
+	_, err := t.GetNamedLongConn(name).Do("HMSET", redis.Args{}.Add(cacheOrderHashKey(order.ID)).AddFlat(m)...)
+	if err != nil {
+		panic(err)
+	}
+
+	return nil
+}
+
+func (t *RedisDb) RmOrderFromSet(user string, id int64, symbol string) error {
 	err := t.Send("MULTI")
 	if err != nil {
 		panic(err)
@@ -80,32 +103,40 @@ func (t *RedisDb) RmOrder(user string, id int64, symbol string) error {
 	return nil
 }
 
-func (t *RedisDb) GetOrder(user string, id int64, symbol string) (*Order, error) {
-	isMember, err := redis.Bool(t.Do("SISMEMBER", orderSetKey(symbol), orderHashKey(user, id)))
+func (t *RedisDb) RmCacheOrder(id int64) error {
+	_, err := t.Do("DEL", cacheOrderHashKey(id))
 	if err != nil {
 		panic(err)
 	}
-	if !isMember {
-		return nil, fmt.Errorf("the order id(%d) not exist int the set(%s)", id, orderSetKey(symbol))
+	return nil
+}
+
+func (t *RedisDb) RmCacheOrderByNamedConn(name string, id int64) error {
+	_, err := t.GetNamedLongConn(name).Do("DEL", cacheOrderHashKey(id))
+	if err != nil {
+		panic(err)
 	}
 
+	return nil
+}
+
+func parseOrder(v []interface{}) *Order {
 	var ro rOrder
-	v, err := redis.Values(t.Do("HGETALL", orderHashKey(user, id)))
-	if err != nil {
-		panic(err)
-	}
+	var err error
+	var iv int64
+	var order Order
+
 	if err := redis.ScanStruct(v, &ro); err != nil {
 		panic(err)
 	}
 	fmt.Printf("Get order: %+v\n", ro)
 
-	order := new(Order)
 	order.ID, err = strconv.ParseInt(ro.ID, 10, 64)
 	if err != nil {
 		panic(err)
 	}
 	order.Who = ro.Who
-	iv, err := strconv.ParseInt(ro.AorB, 10, 64)
+	iv, err = strconv.ParseInt(ro.AorB, 10, 64)
 	if err != nil {
 		panic(err)
 	}
@@ -141,6 +172,45 @@ func (t *RedisDb) GetOrder(user string, id int64, symbol string) (*Order, error)
 		panic(err)
 	}
 	order.Status = TradeStatus(iv)
+
+	return &order
+}
+
+func (t *RedisDb) GetOrderFromSet(user string, id int64, symbol string) (*Order, error) {
+	isMember, err := redis.Bool(t.Do("SISMEMBER", orderSetKey(symbol), orderHashKey(user, id)))
+	if err != nil {
+		panic(err)
+	}
+	if !isMember {
+		return nil, fmt.Errorf("the order id(%d) not exist int the set(%s)", id, orderSetKey(symbol))
+	}
+
+	v, err := redis.Values(t.Do("HGETALL", orderHashKey(user, id)))
+	if err != nil {
+		panic(err)
+	}
+	order := parseOrder(v)
+
+	return order, nil
+}
+
+func (t *RedisDb) GetCacheOrder(id int64) (*Order, error) {
+
+	v, err := redis.Values(t.Do("HGETALL", cacheOrderHashKey(id)))
+	if err != nil {
+		panic(err)
+	}
+	order := parseOrder(v)
+
+	return order, nil
+}
+
+func (t *RedisDb) GetCacheOrderByNamedConn(name string, id int64) (*Order, error) {
+	v, err := redis.Values(t.GetNamedLongConn(name).Do("HGETALL", cacheOrderHashKey(id)))
+	if err != nil {
+		panic(err)
+	}
+	order := parseOrder(v)
 
 	return order, nil
 }

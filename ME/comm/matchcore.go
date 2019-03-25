@@ -126,3 +126,19 @@ func (t *IDOrderMap) Dump() {
 	})
 	fmt.Printf("===================================================================\n")
 }
+
+///------------------------------------------------------------------
+/// price time priority algorithm
+const (
+	PRICE_MULTI_FACTOR float64 = 10000000000000000000
+	PRICE_MAX_VALUE    float64 = 10000000000000000000
+	TIME_DIV_FACTOR    float64 = 10000000000000000000
+)
+
+func BidScore(price float64, timestamp int64) float64 {
+	return (PRICE_MAX_VALUE - price*PRICE_MULTI_FACTOR) + float64(timestamp)
+}
+
+func AskScore(price float64, timestamp int64) float64 {
+	return (price * PRICE_MULTI_FACTOR) + float64(timestamp)
+}

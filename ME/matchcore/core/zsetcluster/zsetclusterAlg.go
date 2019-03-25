@@ -1,122 +1,132 @@
-package zset
+package zsetcluster
 
 import (
 	"fmt"
-	"sync"
 
 	"../../../comm"
 	redis "../../../db/use_redis"
+	"../../cluster"
 )
 
 ///------------------------------------------------------------------
+
 /// ME memory:
 /// Redis cache:
 type OrderContainer struct {
-	comm.IDOrderMap
-
-	ConMutex *sync.RWMutex
+	bidOrders *cluster.OrderCache
+	askOrders *cluster.OrderCache
 }
 
 func NewOrderContainer() *OrderContainer {
 	o := new(OrderContainer)
-	o.IDOrderMap = *comm.NewIDOrderMap()
-	o.ConMutex = new(sync.RWMutex)
+	o.bidOrders = cluster.NewOrderCache(cluster.ORDER_CACHE_CONN_NAME_BID, redis.BID_ORDER_CONTAINER_KEY)
+	o.askOrders = cluster.NewOrderCache(cluster.ORDER_CACHE_CONN_NAME_ASK, redis.ASK_ORDER_CONTAINER_KEY)
 	return o
 }
 
 func (t *OrderContainer) Push(order *comm.Order) {
-	t.ConMutex.Lock()
-	defer t.ConMutex.Unlock()
-
-	t.IDOrderMap.Set(order.ID, order)
 
 	if order.AorB == comm.TradeType_BID {
+		t.bidOrders.AddOrderToCache(order)
 		score := comm.BidScore(order.Price, order.Timestamp)
-		redis.RedisDbInstance().ZSetAddInt64(redis.BID_ORDER_CONTAINER_KEY, score, order.ID)
+		index := redis.RedisDbInstance().ZSetAddInt64ForIndex(redis.BID_ORDER_CONTAINER_KEY, score, order.ID)
+		t.bidOrders.AddOrderToCluster(order, index)
 	} else if order.AorB == comm.TradeType_ASK {
+		t.askOrders.AddOrderToCache(order)
 		score := comm.AskScore(order.Price, order.Timestamp)
-		redis.RedisDbInstance().ZSetAddInt64(redis.ASK_ORDER_CONTAINER_KEY, score, order.ID)
+		index := redis.RedisDbInstance().ZSetAddInt64ForIndex(redis.ASK_ORDER_CONTAINER_KEY, score, order.ID)
+		t.askOrders.AddOrderToCluster(order, index)
 	} else {
-		panic(fmt.Errorf("zset.OrderContainer.Push input illegal type = %d", order.AorB))
+		panic(fmt.Errorf("zsetcluster.OrderContainer.Push input illegal type = %d", order.AorB))
 	}
 }
 
 func (t *OrderContainer) Pop(aorb comm.TradeType) (order *comm.Order) {
-	t.ConMutex.Lock()
-	defer t.ConMutex.Unlock()
-
+	var yes bool = false
 	if aorb == comm.TradeType_BID {
 		if id, ok := redis.RedisDbInstance().ZSetGetInt64(redis.BID_ORDER_CONTAINER_KEY, 0); ok {
 			redis.RedisDbInstance().ZSetRemoveInt64(redis.BID_ORDER_CONTAINER_KEY, id)
-			order = t.Get(id)
-			t.IDOrderMap.Remove(id)
+
+			if order, yes = t.bidOrders.Get(id); !yes {
+				panic(fmt.Errorf("zsetcluster.OrderContainer.Pop id=%d order not exist.", id))
+			}
+			t.bidOrders.RemoveOrder(id)
 			return order
 		}
 	} else if aorb == comm.TradeType_ASK {
 		if id, ok := redis.RedisDbInstance().ZSetGetInt64(redis.ASK_ORDER_CONTAINER_KEY, 0); ok {
 			redis.RedisDbInstance().ZSetRemoveInt64(redis.ASK_ORDER_CONTAINER_KEY, id)
-			order = t.Get(id)
-			t.IDOrderMap.Remove(id)
+
+			if order, yes = t.askOrders.Get(id); !yes {
+				panic(fmt.Errorf("zsetcluster.OrderContainer.Pop id=%d order not exist.", id))
+			}
+			t.askOrders.RemoveOrder(id)
 			return order
 		}
 	} else {
-		panic(fmt.Errorf("zset.OrderContainer.Pop input illegal type = %d", aorb))
+		panic(fmt.Errorf("zsetcluster.OrderContainer.Pop input illegal type = %d", aorb))
 	}
 
 	return nil
 }
 
 func (t *OrderContainer) GetTop(aorb comm.TradeType) *comm.Order {
-	t.ConMutex.RLock()
-	defer t.ConMutex.RUnlock()
-
 	if aorb == comm.TradeType_BID {
 		if id, ok := redis.RedisDbInstance().ZSetGetInt64(redis.BID_ORDER_CONTAINER_KEY, 0); ok {
-			return t.Get(id)
+			order, yes := t.bidOrders.Get(id)
+			if !yes {
+				panic(fmt.Errorf("zsetcluster.OrderContainer.GetTop id=%d order not exist  in cache.", id))
+			}
+			return order
 		}
 	} else if aorb == comm.TradeType_ASK {
 		if id, ok := redis.RedisDbInstance().ZSetGetInt64(redis.ASK_ORDER_CONTAINER_KEY, 0); ok {
-			return t.Get(id)
+			order, yes := t.askOrders.Get(id)
+			if !yes {
+				panic(fmt.Errorf("zsetcluster.OrderContainer.GetTop id=%d order not exist in cache.", id))
+			}
+			return order
 		}
 	} else {
-		panic(fmt.Errorf("zset.OrderContainer.GetTop input illegal type = %d", aorb))
+		panic(fmt.Errorf("zsetcluster.OrderContainer.GetTop input illegal type = %d", aorb))
 	}
 
 	return nil
 }
 
 func (t *OrderContainer) Get(id int64) *comm.Order {
-	order, ok := t.IDOrderMap.Get(id)
-	if ok {
+	order := t.bidOrders.GetOrder(id)
+	if order != nil {
 		return order
-	} else {
-		fmt.Printf("OrderContainer.Get(id=%d) nil\n", id)
-		return nil
 	}
+
+	order = t.askOrders.GetOrder(id)
+	if order != nil {
+		return order
+	}
+
+	return nil
 }
 
 func (t *OrderContainer) GetAll(aorb comm.TradeType) []int64 {
-	t.ConMutex.RLock()
-	defer t.ConMutex.RUnlock()
-
 	if aorb == comm.TradeType_BID {
 		return redis.RedisDbInstance().ZSetGetAll(redis.BID_ORDER_CONTAINER_KEY)
 	} else if aorb == comm.TradeType_ASK {
 		return redis.RedisDbInstance().ZSetGetAll(redis.ASK_ORDER_CONTAINER_KEY)
 	} else {
-		panic(fmt.Errorf("zset.OrderContainer.GetAll input illegal type = %d", aorb))
+		panic(fmt.Errorf("zsetcluster.OrderContainer.GetAll input illegal type = %d", aorb))
 	}
 
 }
 
 func (t *OrderContainer) Dump() {
-	fmt.Printf("======================Dump zset.OrderContainer==========================\n")
-	t.IDOrderMap.Dump()
+	fmt.Printf("======================Dump zsetcluster.OrderContainer==========================\n")
+	fmt.Printf("----------------------Dump bid orders from redis zset ids----------------------\n")
 	ids := t.GetAll(comm.TradeType_BID)
-	fmt.Printf("-------------------Dump bid orders from redis zset ids-------------------\n")
+	t.bidOrders.Dump()
 	var order *comm.Order
 	for c, id := range ids {
-		order = t.Get(id)
+		order = t.bidOrders.GetOrder(id)
 		if order != nil {
 			fmt.Printf("[%d]: id = %d, price = %f, time = %d, volume = %f, totalvolume = %f\n",
 				c,
@@ -128,10 +138,12 @@ func (t *OrderContainer) Dump() {
 			)
 		}
 	}
+
+	fmt.Printf("---------------------Dump ask orders from redis zset ids----------------------\n")
 	ids = t.GetAll(comm.TradeType_ASK)
-	fmt.Printf("------------------Dump ask orders from redis zset ids-------------------\n")
+	t.askOrders.Dump()
 	for c, id := range ids {
-		order = t.Get(id)
+		order = t.askOrders.GetOrder(id)
 		if order != nil {
 			fmt.Printf("[%d]: id = %d, price = %f, time = %d, volume = %f, totalvolume = %f\n",
 				c,
@@ -143,7 +155,7 @@ func (t *OrderContainer) Dump() {
 			)
 		}
 	}
-	fmt.Printf("===================================================================\n")
+	fmt.Printf("===============================================================================\n")
 }
 
 func (t *OrderContainer) BidSize() int64 {
@@ -155,5 +167,5 @@ func (t *OrderContainer) AskSize() int64 {
 }
 
 func (t *OrderContainer) TheSize() int64 {
-	return t.IDOrderMap.Len()
+	return t.bidOrders.Len + t.askOrders.Len
 }

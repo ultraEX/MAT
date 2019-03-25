@@ -711,6 +711,63 @@ func (t *MEMySQLDB) AddTrade(trade *Trade, tx *sql.Tx) error {
 	return nil
 }
 
+/// seperate trade record item
+func (t *MEMySQLDB) InsertTrade(trade *Trade, tx *sql.Tx) error {
+	var (
+		cB, cR int64 = 0, 0
+		err    error
+		res    sql.Result
+	)
+
+	cB, cR = symbolConvertTo(trade.Symbol)
+
+	cmd := `INSERT INTO %s
+			(trade_no, member_id, currency_id, currency_trade_id, price, num, money, fee, type, add_time, status) VALUES
+			(?,?,?,?,?,?,?,?,?,?,?)`
+	sql := fmt.Sprintf(cmd, TABLE_TRADE)
+	if tx == nil {
+		res, err = t.db.Exec(sql,
+			strconv.FormatInt(trade.ID, 10),
+			whoConvertTo(trade.Who),
+
+			cB,
+			cR,
+
+			trade.Price,
+			trade.Volume,
+			trade.Price*trade.Volume,
+
+			trade.FeeCost,
+
+			tradeTypeConvertTo(trade.AorB),
+
+			trade.TradeTime/int64(time.Second),
+			tradeStatusConvertTo(trade.Status))
+	} else {
+		res, err = tx.Exec(sql,
+			strconv.FormatInt(trade.ID, 10),
+			whoConvertTo(trade.Who),
+
+			cB,
+			cR,
+
+			trade.Price,
+			trade.Volume,
+			trade.Price*trade.Volume,
+
+			trade.FeeCost,
+
+			tradeTypeConvertTo(trade.AorB),
+
+			trade.TradeTime/int64(time.Second),
+			tradeStatusConvertTo(trade.Status))
+	}
+	checkErr(err)
+
+	MySQLOpeResaultLog(res, "InsertTrade")
+	return nil
+}
+
 /// trade couple(composed of bid and ask trades) record at trade table
 func (t *MEMySQLDB) AddTradeCouple(bidTrade *Trade, askTrade *Trade, tx *sql.Tx) error {
 	var (
@@ -799,6 +856,85 @@ func (t *MEMySQLDB) AddTradeCouple(bidTrade *Trade, askTrade *Trade, tx *sql.Tx)
 	checkErr(err)
 
 	MySQLOpeResaultLog(res, "AddTradeCouple")
+	return nil
+}
+
+/// trade couple(composed of bid and ask trades) record at trade table seperately.
+func (t *MEMySQLDB) InsertTradeCouple(bidTrade *Trade, askTrade *Trade, tx *sql.Tx) error {
+	var (
+		err error
+		res sql.Result
+	)
+
+	if bidTrade.Symbol != askTrade.Symbol {
+		return fmt.Errorf("AddTradeCouple trade couple not corresponding, cause: bidTrade.Symbol != askTrade.Symbol")
+	}
+	cB, cQ, err := getCoinFromSymbol(bidTrade.Symbol)
+	if err != nil {
+		return fmt.Errorf("AddTradeCouple fail! Cause: bid with illegal bid symbol(%s)", bidTrade.Symbol)
+	}
+
+	cmd := `INSERT INTO %s
+			(trade_no, member_id, currency_id, currency_trade_id, price, num, money, fee, type, add_time, status) VALUES
+			(?,?,?,?,?,?,?,?,?,?,?),
+			(?,?,?,?,?,?,?,?,?,?,?)`
+	sql := fmt.Sprintf(cmd, TABLE_TRADE)
+	if tx == nil {
+		res, err = t.db.Exec(sql,
+			strconv.FormatInt(bidTrade.ID, 10),
+			whoConvertTo(bidTrade.Who),
+			int64(cB),
+			int64(cQ),
+			bidTrade.Price,
+			bidTrade.Volume,
+			bidTrade.Price*bidTrade.Volume,
+			bidTrade.FeeCost,
+			tradeTypeConvertTo(bidTrade.AorB),
+			bidTrade.TradeTime/int64(time.Second),
+			tradeStatusConvertTo(bidTrade.Status),
+
+			strconv.FormatInt(askTrade.ID, 10),
+			whoConvertTo(askTrade.Who),
+			int64(cB),
+			int64(cQ),
+			askTrade.Price,
+			askTrade.Volume,
+			askTrade.Price*askTrade.Volume,
+			askTrade.FeeCost,
+			tradeTypeConvertTo(askTrade.AorB),
+			askTrade.TradeTime/int64(time.Second),
+			tradeStatusConvertTo(askTrade.Status),
+		)
+	} else {
+		res, err = tx.Exec(sql,
+			strconv.FormatInt(bidTrade.ID, 10),
+			whoConvertTo(bidTrade.Who),
+			int64(cB),
+			int64(cQ),
+			bidTrade.Price,
+			bidTrade.Volume,
+			bidTrade.Price*bidTrade.Volume,
+			bidTrade.FeeCost,
+			tradeTypeConvertTo(bidTrade.AorB),
+			bidTrade.TradeTime/int64(time.Second),
+			tradeStatusConvertTo(bidTrade.Status),
+
+			strconv.FormatInt(askTrade.ID, 10),
+			whoConvertTo(askTrade.Who),
+			int64(cB),
+			int64(cQ),
+			askTrade.Price,
+			askTrade.Volume,
+			askTrade.Price*askTrade.Volume,
+			askTrade.FeeCost,
+			tradeTypeConvertTo(askTrade.AorB),
+			askTrade.TradeTime/int64(time.Second),
+			tradeStatusConvertTo(askTrade.Status),
+		)
+	}
+	checkErr(err)
+
+	MySQLOpeResaultLog(res, "InsertTradeCouple")
 	return nil
 }
 

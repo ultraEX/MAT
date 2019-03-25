@@ -166,9 +166,11 @@ ME Core Daemon Manager Tool:
 # Match Core Algorithm Config:
 	"Algorithm": "heapmap"
 	"Algorithm": "zset"
+	"Algorithm": "zsetcluster"
 
 # Test Redis itf:
 	redis zset add key score mem
+	redis zset addforindex key score mem
 	redis zset rm key mem
 	redis zset get key index
 	redis zset gets key start stop
@@ -187,7 +189,20 @@ ME Core Daemon Manager Tool:
 	redis zset add bid_orders_container 1.1 223
 	redis zset add bid_orders_container 2.1 323
 	redis zset add bid_orders_container 3.1 423
+
+	redis zset addforindex bid_orders_container 2.3 333
+	redis zset addforindex bid_orders_container 2.4 336
 	----------------------------------------------------------------------------
 
 	redis zset all bid_orders_container
 	redis zset all ask_orders_container
+	----------------------------------------------------------------------------
+	ZRANGE bid_orders_container 0 1000
+	ZRANK bid_orders_container 2291247880764611467
+	ZSCORE bid_orders_container 2291247880764611467 
+	ZCARD bid_orders_container
+	----------------------------------------------------------------------------
+	DEL KEY_NAME
+	DEL bid_orders_container ask_orders_container
+	
+

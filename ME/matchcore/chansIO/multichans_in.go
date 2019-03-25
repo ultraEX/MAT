@@ -2,6 +2,7 @@ package chansIO
 
 import (
 	"fmt"
+	"sync/atomic"
 
 	"../../comm"
 )
@@ -15,63 +16,6 @@ const (
 var (
 	IN_MULTI_CHANS_SIZE_VAR int = 10
 )
-
-type InElemType int64
-
-const (
-	InElemType_EnOrder  InElemType = 1
-	InElemType_CancelID InElemType = 2
-)
-
-func (p InElemType) String() string {
-	switch p {
-	case InElemType_EnOrder:
-		return "InElemType: EnOrder"
-	case InElemType_CancelID:
-		return "InElemType: CancelID"
-	}
-	return "<InElemType UNSET>"
-}
-
-type InElem struct {
-	Type_    InElemType
-	Order    *comm.Order
-	CancelId int64
-	Count    int
-}
-
-type ChanUnit_In struct {
-	ch chan *InElem
-	no int
-}
-
-func NewChanUnit_In(no int) *ChanUnit_In {
-	o := new(ChanUnit_In)
-	o.ch = make(chan *InElem, IN_CHANNEL_SIZE)
-	o.no = no
-
-	return o
-}
-
-func (t *ChanUnit_In) Len() int {
-	return len(t.ch)
-}
-
-func (t *ChanUnit_In) Cap() int {
-	return cap(t.ch)
-}
-
-func (t *ChanUnit_In) IsBusy() bool {
-	return len(t.ch) == cap(t.ch)
-}
-
-func (t *ChanUnit_In) In(elem *InElem) {
-	t.ch <- elem
-}
-
-func (t *ChanUnit_In) Out() (elem *InElem) {
-	return <-t.ch
-}
 
 type ChanProcess_In func(int)
 type MultiChans_In struct {
@@ -105,20 +49,20 @@ func (t *MultiChans_In) InChannel(elem *InElem) {
 	case InElemType_EnOrder:
 		id := elem.Order.ID
 		chSet := t.GetIdleChannel(id)
-		elem.Count = len(chSet)
-		for _, v := range chSet {
-			t.chanUse.InChan(id, v)
-			t.chans[v].In(elem)
+		elem.Count = int64(chSet.Len())
+		for _, v := range chSet.Elements() {
+			t.chanUse.InChan(id, v.(int))
+			t.chans[v.(int)].In(elem)
 		}
 		comm.DebugPrintf(MODULE_NAME_MULTICHANS_IN, comm.LOG_LEVEL_TRACK, "MultiChans_In InElemType_EnOrder InChannel(%v).\n", chSet)
 
 	case InElemType_CancelID:
 		id := elem.CancelId
 		chSet := t.GetIdleChannel(id)
-		elem.Count = len(chSet)
-		for _, v := range chSet {
-			t.chanUse.InChan(id, v)
-			t.chans[v].In(elem)
+		elem.Count = int64(chSet.Len())
+		for _, v := range chSet.Elements() {
+			t.chanUse.InChan(id, v.(int))
+			t.chans[v.(int)].In(elem)
 		}
 		comm.DebugPrintf(MODULE_NAME_MULTICHANS_IN, comm.LOG_LEVEL_TRACK, "MultiChans_In InElemType_CancelID InChannel(%v).\n", chSet)
 	}
@@ -126,7 +70,7 @@ func (t *MultiChans_In) InChannel(elem *InElem) {
 
 func (t *MultiChans_In) OutChannel(chNO int) (*InElem, bool) {
 	elem := t.chans[chNO].Out()
-	elem.Count--
+	count := atomic.AddInt64(&elem.Count, -1)
 
 	// chanuse manage
 	switch elem.Type_ {
@@ -142,7 +86,7 @@ func (t *MultiChans_In) OutChannel(chNO int) (*InElem, bool) {
 			chNO, elem.CancelId, chNO)
 	}
 
-	if elem.Count <= 0 {
+	if count <= 0 {
 		comm.DebugPrintf(MODULE_NAME_MULTICHANS_IN, comm.LOG_LEVEL_TRACK, "MultiChans_In OutChannel(%d): %v.\n", chNO, elem)
 		return elem, true
 	} else {
@@ -180,13 +124,7 @@ func (t *MultiChans_In) ChanCap() int {
 	return IN_CHANNEL_SIZE
 }
 
-func (t *MultiChans_In) GetIdleChannel(id int64) []int {
-	/// if a secondary commer, use the original channel to ensure serialize
-	if chans, ok := t.chanUse.GetChan(id); ok {
-		return chans
-	}
-
-	/// if a new commer
+func (t *MultiChans_In) getANewChan() int {
 	idleno := t.idleChanNO
 	for i := 0; i < IN_MULTI_CHANS_SIZE; i++ {
 		no := t.idleChanNO + i
@@ -205,6 +143,17 @@ func (t *MultiChans_In) GetIdleChannel(id int64) []int {
 	if t.idleChanNO >= IN_MULTI_CHANS_SIZE {
 		t.idleChanNO = 0
 	}
+	return idleno
+}
 
-	return []int{idleno}
+func (t *MultiChans_In) GetIdleChannel(id int64) comm.Set {
+	/// if a secondary commer, use the original channel to ensure serialize
+	chans, ok := t.chanUse.GetChan(id)
+	if ok {
+		return chans
+	}
+
+	/// if a new commer
+	chans.Add(t.getANewChan())
+	return chans
 }

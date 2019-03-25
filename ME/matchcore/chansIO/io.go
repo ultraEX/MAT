@@ -3,11 +3,15 @@ package chansIO
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"../../comm"
 )
 
 const MODULE_NAME_MULTICHANS_IO string = "[MultiChans_IO]: "
+const (
+	OUT_CHANNEL_SIZE int = 6
+)
 
 type OutPoolType int64
 
@@ -36,7 +40,7 @@ type CanceledOrder struct {
 }
 
 type Counter struct {
-	count int
+	count int64
 }
 
 func NewCounter() *Counter {
@@ -46,35 +50,11 @@ func NewCounter() *Counter {
 }
 
 func (t *Counter) Inc() {
-	t.count++
+	atomic.AddInt64(&t.count, 1)
 }
 
 func (t *Counter) Dec() {
-	t.count--
-}
-
-type MutexMap struct {
-	mutexMap sync.Map
-}
-
-func (t *MutexMap) Lock(id int64) {
-	if lockItf, ok := t.mutexMap.Load(id); ok {
-		lock := lockItf.(*sync.Mutex)
-		lock.Lock()
-	} else {
-		lock := sync.Mutex{}
-		t.mutexMap.Store(id, &lock)
-		lock.Lock()
-	}
-}
-
-func (t *MutexMap) Unlock(id int64) {
-	if lockItf, ok := t.mutexMap.Load(id); ok {
-		lock := lockItf.(*sync.Mutex)
-		lock.Unlock()
-	} else {
-		panic(fmt.Errorf("MutexMap.Unlock  a not exist lock, logic error, check it!!!"))
-	}
+	atomic.AddInt64(&t.count, -1)
 }
 
 type ChansCount struct {
@@ -114,8 +94,8 @@ func (t *ChansCount) Len() int {
 	return len(t.countsMap)
 }
 
-func (t *ChansCount) Size() int {
-	size := 0
+func (t *ChansCount) Size() int64 {
+	var size int64 = 0
 	for _, v := range t.countsMap {
 		size += v.count
 	}
@@ -135,26 +115,19 @@ func (t *ChansCount) Dump() {
 
 type ChannelUse struct {
 	chansMap map[int64]*ChansCount
-	conMutex sync.Mutex
-	// chansMap sync.Map
+	conMutex *sync.RWMutex
 }
 
 func NewChannelUse() *ChannelUse {
 	o := new(ChannelUse)
 	o.chansMap = make(map[int64]*ChansCount)
+	o.conMutex = new(sync.RWMutex)
 	return o
 }
 
-func (t *ChannelUse) IsSubEmpty(id int64) bool {
-	// if chans, ok := t.chansMap.Load(id); ok {
-	// 	cs := chans.(*sync.Map)
-	// 	is := true
-	// 	cs.Range(func(k, v interface{}) bool {
-	// 		is = false
-	// 		return false
-	// 	})
-	// 	return is
-	// }
+func (t *ChannelUse) IsChanEmpty(id int64) bool {
+	t.conMutex.RLock()
+	defer t.conMutex.RUnlock()
 
 	if chans, ok := t.chansMap[id]; ok {
 		if chans.Len() <= 0 {
@@ -167,33 +140,9 @@ func (t *ChannelUse) IsSubEmpty(id int64) bool {
 }
 
 func (t *ChannelUse) InChan(id int64, no int) {
-
-	// // chans, ok := t.chansMap[id]
-	// var cs *sync.Map
-	// chans, isID := t.chansMap.Load(id)
-	// chans.ConMutex.
-	// if isID {
-	// 	cs = chans.(*sync.Map)
-	// 	if count, ok := cs.Load(no); ok {
-	// 		// t.chansMap[id][no]++
-	// 		// cs.Store(no, count.(int)+1)
-	// 		pCount := count.(*int32)
-	// 		atomic.AddInt32(pCount, 1)
-	// 	} else {
-	// 		// t.chansMap[id][no] = 1
-	// 		// cs.Store(no, 1)
-	// 		pCount := count.(*int32)
-	// 		atomic.StoreInt32(pCount, 1)
-	// 	}
-	// } else {
-	// 	var u sync.Map
-	// 	var count int32 = 1
-	// 	u.Store(no, &count)
-	// 	cs = &u
-	// 	t.chansMap.Store(id, &u)
-	// }
-
 	t.conMutex.Lock()
+	defer t.conMutex.Unlock()
+
 	chans, ok := t.chansMap[id]
 	if ok {
 		chans.ChanCountInc(no)
@@ -202,7 +151,6 @@ func (t *ChannelUse) InChan(id int64, no int) {
 		chans.ChanCountInc(no)
 		t.chansMap[id] = chans
 	}
-	t.conMutex.Unlock()
 
 	comm.DebugPrintf(MODULE_NAME_MULTICHANS_IO, comm.LOG_LEVEL_TRACK,
 		"ChannelUse id(%d) InChan(%d): len(chansMap)=%d, len(chansMap[id])=%d.\n",
@@ -210,38 +158,8 @@ func (t *ChannelUse) InChan(id int64, no int) {
 }
 
 func (t *ChannelUse) OutChan(id int64, no int) {
-	// // set := t.chansMap[id]
-	// chans, ok := t.chansMap.Load(id)
-	// if !ok {
-	// 	panic(fmt.Errorf("id(%d) not exist in chanusemap, Logic error, Check it!!!", id))
-	// }
-
-	// //if _, ok := t.chansMap[id][no]; ok {
-	// cs := chans.(*sync.Map)
-	// if count, ok := cs.Load(no); ok {
-	// 	//t.chansMap[id][no]--
-	// 	// cs.Store(no, count.(int)-1)
-	// 	pCount := count.(*int32)
-	// 	atomic.AddInt32(pCount, -1)
-	// 	//if t.chansMap[id][no] <= 0 {
-	// 	if count, ok := cs.Load(no); ok && count.(int) <= 0 {
-	// 		// delete(t.chansMap[id], no)
-	// 		cs.Delete(no)
-	// 	}
-	// 	// if len(t.chansMap[id]) == 0 {
-	// 	if t.isSubEmpty(id) {
-	// 		// delete(t.chansMap, id)
-	// 		t.chansMap.Delete(id)
-	// 	}
-
-	// 	comm.DebugPrintf(MODULE_NAME_MULTICHANS_IO, comm.LOG_LEVEL_TRACK,
-	// 		"ChannelUse id(%d) OutChan(%d): len(chansMap)=%d, len(t.chansMap[id])=%d.\n",
-	// 		id, no, comm.LenOfSyncMap(&t.chansMap), comm.LenOfSyncMap(cs))
-	// } else {
-	// 	panic(fmt.Errorf("ChannelUse logic error2."))
-	// }
-
 	t.conMutex.Lock()
+	defer t.conMutex.Unlock()
 
 	chans, ok := t.chansMap[id]
 	if !ok {
@@ -258,30 +176,32 @@ func (t *ChannelUse) OutChan(id int64, no int) {
 		"ChannelUse id(%d) OutChan(%d): len(chansMap)=%d, len(t.chansMap[id])=%d.\n",
 		id, no, len(t.chansMap), size)
 
-	t.conMutex.Unlock()
 }
 
-func (t *ChannelUse) RemoveFromChan(id int64) {
+func (t *ChannelUse) RemoveID(id int64) {
 	t.conMutex.Lock()
+	defer t.conMutex.Unlock()
+
 	delete(t.chansMap, id)
-	t.conMutex.Unlock()
-	// t.chansMap.Delete(id)
+
 }
 
-func (t *ChannelUse) GetChan(id int64) ([]int, bool) {
-	t.conMutex.Lock()
-	var chSet []int = nil
+func (t *ChannelUse) GetChan(id int64) (*comm.HashSet, bool) {
+	t.conMutex.RLock()
+	defer t.conMutex.RUnlock()
+
+	var chSet *comm.HashSet = comm.NewHashSet()
 	var res bool = false
 	if cs, ok := t.chansMap[id]; ok {
 		for k, _ := range cs.countsMap {
-			chSet = append(chSet, k)
+			// chSet = append(chSet, k)
+			chSet.Add(k)
 		}
 		res = true
 	} else {
 		res = false
 	}
-	t.conMutex.Unlock()
-	// v, ok = t.chansMap.Load(id)
+
 	return chSet, res
 }
 
@@ -290,30 +210,17 @@ func (t *ChannelUse) Len() int {
 }
 
 func (t *ChannelUse) Status() (int, int, int) {
-	// IDs := comm.LenOfSyncMap(&t.chansMap)
-	// CHs := 0
-	// chnums := 0
-	// // for _, v := range t.chansMap {
-	// t.chansMap.Range(func(k, v interface{}) bool {
-	// 	cs := v.(*sync.Map)
-	// 	CHs += comm.LenOfSyncMap(v.(*sync.Map))
-	// 	// for _, value := range v {
-	// 	cs.Range(func(k, v interface{}) bool {
-	// 		chnums += v.(int)
-	// 		return true
-	// 	})
-	// 	return true
-	// })
+	t.conMutex.RLock()
+	defer t.conMutex.RUnlock()
 
 	IDs := len(t.chansMap)
 	CHs := 0
 	chnums := 0
-	t.conMutex.Lock()
+
 	for _, v := range t.chansMap {
 		CHs += v.Len()
-		chnums += v.Size()
+		chnums += int(v.Size())
 	}
-	t.conMutex.Unlock()
 
 	return IDs, CHs, chnums
 }

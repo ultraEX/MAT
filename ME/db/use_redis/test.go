@@ -31,17 +31,17 @@ func (t *RedisDb) TestRedis(u string, o string, p ...interface{}) {
 
 		switch o {
 		case "add":
-			t.testRedis_AddOrder(&order)
+			t.testRedis_AddOrderToSet(&order)
 		case "rm":
 			user, _ := p[0].(string)
 			id, _ := strconv.ParseInt(p[1].(string), 10, 64)
 			symbol, _ := p[2].(string)
-			t.testRedis_RmOrder(user, id, symbol)
+			t.testRedis_RmOrderFromSet(user, id, symbol)
 		case "get":
 			user, _ := p[0].(string)
 			id, _ := strconv.ParseInt(p[1].(string), 10, 64)
 			symbol, _ := p[2].(string)
-			t.testRedis_GetOrder(user, id, symbol)
+			t.testRedis_GetOrderFromSet(user, id, symbol)
 		case "all":
 			symbol, _ := p[0].(string)
 			t.testRedis_GetAllOrder(symbol)
@@ -102,6 +102,11 @@ func (t *RedisDb) TestRedis(u string, o string, p ...interface{}) {
 			score, _ := strconv.ParseFloat(p[1].(string), 64)
 			mem, _ := strconv.ParseInt(p[2].(string), 10, 64)
 			t.testRedis_ZSetAddInt64(key, score, mem)
+		case "addforindex":
+			key, _ := p[0].(string)
+			score, _ := strconv.ParseFloat(p[1].(string), 64)
+			mem, _ := strconv.ParseInt(p[2].(string), 10, 64)
+			t.testRedis_ZSetAddInt64ForIndex(key, score, mem)
 		case "rm":
 			key, _ := p[0].(string)
 			mem, _ := strconv.ParseInt(p[1].(string), 10, 64)
@@ -127,29 +132,29 @@ func (t *RedisDb) TestRedis(u string, o string, p ...interface{}) {
 }
 
 //Order:--------------
-func (t *RedisDb) testRedis_AddOrder(order *comm.Order) {
-	if err := t.AddOrder(order); err != nil {
+func (t *RedisDb) testRedis_AddOrderToSet(order *comm.Order) {
+	if err := t.AddOrderToSet(order); err != nil {
 		panic(err)
 	}
 
-	fmt.Println("testRedis_AddOrder execute complete! Please check it use: KEYS * ")
+	fmt.Println("testRedis_AddOrderToSet execute complete! Please check it use: KEYS * ")
 }
 
-func (t *RedisDb) testRedis_RmOrder(user string, id int64, symbol string) {
-	if err := t.RmOrder(user, id, symbol); err != nil {
+func (t *RedisDb) testRedis_RmOrderFromSet(user string, id int64, symbol string) {
+	if err := t.RmOrderFromSet(user, id, symbol); err != nil {
 		panic(err)
 	}
 
-	fmt.Println("testRedis_RmOrder execute complete! Please check it use: GET ", orderHashKey(user, id), "\nAnd use: SISMEMBER ", orderSetKey(symbol), " ", orderHashKey(user, id))
+	fmt.Println("testRedis_RmOrderFromSet execute complete! Please check it use: GET ", orderHashKey(user, id), "\nAnd use: SISMEMBER ", orderSetKey(symbol), " ", orderHashKey(user, id))
 }
 
-func (t *RedisDb) testRedis_GetOrder(user string, id int64, symbol string) {
-	order, err := t.GetOrder(user, id, symbol)
+func (t *RedisDb) testRedis_GetOrderFromSet(user string, id int64, symbol string) {
+	order, err := t.GetOrderFromSet(user, id, symbol)
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Println("GetOrder Return:\nid: ", order.ID,
+	fmt.Println("testRedis_GetOrderFromSet Return:\nid: ", order.ID,
 		"; who: ", order.Who,
 		"; AorB: ", order.AorB,
 		"; Symbol: ", order.Symbol,
@@ -296,6 +301,12 @@ func (t *RedisDb) testRedis_GetOnesTrade(user string, symbol string) {
 func (t *RedisDb) testRedis_ZSetAddInt64(key string, score float64, mem int64) {
 	t.ZSetAddInt64(key, score, mem)
 	fmt.Printf("testRedis_ZSetAddInt64: key = %s, score = %f, mem = %d\n", key, score, mem)
+}
+
+func (t *RedisDb) testRedis_ZSetAddInt64ForIndex(key string, score float64, mem int64) {
+	index := t.ZSetAddInt64ForIndex(key, score, mem)
+	fmt.Printf("testRedis_ZSetAddInt64ForIndex: key = %s, score = %f, mem = %d\n", key, score, mem)
+	fmt.Printf("Get index = %d\n", index)
 }
 
 func (t *RedisDb) testRedis_ZSetRemoveInt64(key string, mem int64) {

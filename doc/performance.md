@@ -86,97 +86,76 @@ Core TPS = 2500TPS
 
 # HeapMap algorith:
     ----------------------------------------------------------
+    db 50t input:
+    =====================[Trade Statics]=====================
+    Trade Complete Rate	: 516.125000
+    Trade UserInput Rate	: 517.687500
+    min=0.000007848, max=0.003499953, ave=0.000047240
+    ----------------------------------------------------------
     db 3t input:
     =====================[Trade Statics]=====================
-    Trade Complete Rate	: 488.577320
-    Trade UserInput Rate	: 488.079038
-    min=0.000007725, max=0.012695990, ave=0.000031050
-    ----------------------------------------------------------
-    no db 3t input: 
-    =====================[Trade Statics]=====================
-    Trade Complete Rate	: 1804.695652
-    Trade UserInput Rate	: 1804.782609
-    min=0.000006757, max=0.005633696, ave=0.000025010
-    ----------------------------------------------------------
-    no db; no input:
-    =====================[Trade Statics]=====================
-    Trade Complete Rate	: 4064.787879
-    Trade UserInput Rate	: 0.000000
-    min=0.000013287, max=0.000626086, ave=0.000021118
-    ----------------------------------------------------------
-    db; no input:
-    Trade Complete Rate	: 869.875000
-    Trade UserInput Rate	: 0.000000
-    min=0.000009847, max=0.245967610, ave=0.002060195
-    ----------------------------------------------------------
-
-
-Redis:
-# write conn pool 50t and read long connect:
-    ----------------------------------------------------------
-    db 50t input:
-    =====================[Trade Statics]=====================
-    Trade Complete Rate	: 421.803279
-    Trade UserInput Rate	: 424.098361
-    ----------------------------------------------------------
-    no db; 50t input
-    =====================[Trade Statics]=====================
-    Trade Complete Rate	: 177.000000
-    Trade UserInput Rate	: 2348.000000
-
-    read and write conn pool 50t : with echo 1 > /proc/sys/net/ipv4/tcp_tw_reuse to resolve
-    ----------------------------------------------------------
-    db 50t input:
-    =====================[Trade Statics]=====================
-    Trade Complete Rate	: 435.397260
-    Trade UserInput Rate	: 435.301370
-    no core block, input block
-    ----------------------------------------------------------
-    no db; 50t input
-    =====================[Trade Statics]=====================
-    Trade Complete Rate	: 134.210526
-    Trade UserInput Rate	: 2330.763158
-    core block, input block, tcp exhaust:
-    ----------------------------------------------------------
-    no db; 50t no input
-    =====================[Trade Statics]=====================
-    Trade Complete Rate	: 1045.714286
-    Trade UserInput Rate	: 0.000000
-    core block
-
-
-# read and write conn pool size = 20 long conn 50t input:
-    ----------------------------------------------------------
-    db 50t input:
-    =====================[Trade Statics]=====================
-    Trade Complete Rate	: 435.397260
-    Trade UserInput Rate	: 435.301370
-    min=0.000319990, max=0.464930839, ave=0.002173594
-    ----------------------------------------------------------
-    DB no input:
-    =====================[Trade Statics]=====================
-    Trade Complete Rate	: 841.272727
-    min=0.000392272, max=0.186604125, ave=0.002121815
-    ----------------------------------------------------------
-    no db; 50t input
-    =====================[Trade Statics]=====================
-    Trade Complete Rate	: 281.595960
-    Trade UserInput Rate	: 2593.606061
-    min=0.000298820, max=0.140903118, ave=0.004596609
+    Trade Complete Rate	: 519.000000
+    Trade UserInput Rate	: 519.375000
+    min=0.000007348, max=0.006515375, ave=0.000022775
     ----------------------------------------------------------
     no db;  no input
     =====================[Trade Statics]=====================
-    Trade Complete Rate	: 1950.875000
-    min=0.000370619, max=0.011265291, ave=0.000852587
+    Trade Complete Rate	: 4104.285714
+    min=0.000010371, max=0.000222119, ave=0.000018568
+    ----------------------------------------------------------
+    no db; 10t input
+    =====================[Trade Statics]=====================
+    Trade Complete Rate	: 2803.052632
+    Trade UserInput Rate	: 2777.421053
+    min=0.000005767, max=0.007608442, ave=0.000032099
+
+# read and write conn pool size = 20 long conn  ZSET:
+    ----------------------------------------------------------
+    db 50t input:
+    =====================[Trade Statics]=====================
+    Trade Complete Rate	: 502.473684
+    Trade Output Rate	: 502.473684
+    min=0.000292373, max=0.007700843, ave=0.000860140
     ----------------------------------------------------------
     db 1t input:
     =====================[Trade Statics]=====================
-    Trade Complete Rate	: 482.392857
-    Trade UserInput Rate	: 482.410714
-    min=0.000319973, max=0.008891241, ave=0.000904471
+    Trade Complete Rate	: 512.533333
+    Trade UserInput Rate : 512.700000
+    min=0.000295650, max=0.007213568, ave=0.000864988
     ----------------------------------------------------------
-    no db; 5t input
+    no db;  no input
     =====================[Trade Statics]=====================
-    Trade Complete Rate	: 1502.738462
-    Trade UserInput Rate	: 2073.415385
-    min=0.000316392, max=0.011029822, ave=0.000680217
+    Trade Complete Rate	: 1248.166667
+    min=0.000644140, max=0.011659677, ave=0.000813154
+    ----------------------------------------------------------
+    no db; 3t input
+    =====================[Trade Statics]=====================
+    Trade Complete Rate	: 1467.142857
+    Trade UserInput Rate	: 1728.666667
+    min=0.000284877, max=0.017973812, ave=0.000681658
+
+
+# read and write conn pool size = 20 long conn ZSET cluster:
+    ----------------------------------------------------------
+    db 50t input:
+    =====================[Trade Statics]=====================
+    Trade Complete Rate	: 496.040000
+    Trade UserInput Rate	: 496.070000
+    min=0.000295701, max=0.012430970, ave=0.000876474
+    ----------------------------------------------------------
+    db 3t input:
+    =====================[Trade Statics]=====================
+    Trade Complete Rate	: 500.771186
+    Trade UserInput Rate	: 501.258475
+    min=0.000292328, max=0.008344563, ave=0.000863759
+    ----------------------------------------------------------
+    no db;  no input
+    =====================[Trade Statics]=====================
+    Trade Complete Rate	: 1101.250000
+    min=0.000457682, max=0.011416975, ave=0.000907607
+    ----------------------------------------------------------
+    no db; 3t input
+    =====================[Trade Statics]=====================
+    Trade Complete Rate	: 1404.000000
+    Trade UserInput Rate	: 1664.717391
+    min=0.000285335, max=0.015078506, ave=0.000727047

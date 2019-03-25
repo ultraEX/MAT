@@ -1,6 +1,8 @@
 package use_redis
 
-import "github.com/gomodule/redigo/redis"
+import (
+	"github.com/gomodule/redigo/redis"
+)
 
 type ConnPool struct {
 	Size      int
@@ -22,6 +24,10 @@ func NewConnPool(size int) *ConnPool {
 
 func (t *ConnPool) GetConn() *redis.Conn {
 	return <-t.idleQueue
+}
+
+func (t *ConnPool) GetNamedLongConn(name string) *LongConn {
+	return t.redispool.GetLongConn(name)
 }
 
 func (t *ConnPool) RecycleConn(conn *redis.Conn) {

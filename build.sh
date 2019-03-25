@@ -36,7 +36,8 @@ function buildME()
 	#########build ME
 	echo -e "Build ${ME_exe}..."
 	cd ${work_path}"/"${ME_dir}
-	go build -o ${bin_path}"/"${ME_exe} -ldflags "-s -w"
+	# go build -o ${bin_path}"/"${ME_exe} -ldflags "-s -w"
+	go build -o ${bin_path}"/"${ME_exe} 
 	
 	
 	#########build ME-cli

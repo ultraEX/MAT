@@ -381,7 +381,11 @@ func (t *DesTimeHeap) Pop() (ret interface{}) {
 
 func (t *DesTimeHeap) GetTop() (ret interface{}) {
 	l := len(t.orders)
-	return t.orders[l-1]
+	if l == 0 {
+		return nil
+	} else {
+		return t.orders[0]
+	}
 }
 
 type OrdersByTime struct {
@@ -414,7 +418,14 @@ func (t *OrdersByTime) Len() int64 {
 }
 
 func (t *OrdersByTime) GetTop() *comm.Order {
-	return t.orders.GetTop().(*comm.Order)
+	t.ConMutex.Lock()
+	defer t.ConMutex.Unlock()
+	orderItf := t.orders.GetTop()
+	if orderItf != nil {
+		return orderItf.(*comm.Order)
+	} else {
+		return nil
+	}
 }
 
 ///------------------------------------------------------------------

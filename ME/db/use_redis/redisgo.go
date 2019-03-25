@@ -14,7 +14,7 @@ import (
 
 const (
 	DEFAULT_POOL_MAX_IDLE      = 1
-	DEFAULT_POOL_MAX_ACTIVE    = 50
+	DEFAULT_POOL_MAX_ACTIVE    = 300
 	DEFAULT_POOL_IDLE_TIMEOUT  = 180 * time.Second
 	DEFAULT_POOL_MAX_LIFE_TIME = 60 * time.Second
 )
@@ -24,9 +24,71 @@ type LongConn struct {
 	ConMutex sync.Mutex
 }
 
+func NewLongConn(conn *redis.Conn) *LongConn {
+	o := new(LongConn)
+	o.long = conn
+	return o
+}
+
+func (t *LongConn) Do(command string, args ...interface{}) (interface{}, error) {
+	conn := *t.long
+	t.ConMutex.Lock()
+	defer t.ConMutex.Unlock()
+	return conn.Do(command, args...)
+}
+
+func (t *LongConn) Send(command string, args ...interface{}) error {
+	conn := *t.long
+	t.ConMutex.Lock()
+	defer t.ConMutex.Unlock()
+	return conn.Send(command, args...)
+}
+
+type LongConnMap struct {
+	m    sync.Map
+	pool *redis.Pool
+}
+
+func NewLongConnMap(p *redis.Pool) *LongConnMap {
+	o := new(LongConnMap)
+	o.pool = p
+	return o
+}
+
+func (t *LongConnMap) GetLongConn(name string) *LongConn {
+	if v, ok := t.m.Load(name); ok {
+		conn := v.(*LongConn)
+		return conn
+	} else {
+		conn := t.pool.Get()
+		long := NewLongConn(&conn)
+		t.m.Store(name, long)
+		return long
+	}
+}
+
+func (t *LongConnMap) CloseLongConn(name string) {
+	if v, ok := t.m.Load(name); ok {
+		l := v.(*LongConn)
+		conn := *l.long
+		conn.Close()
+		t.m.Delete(name)
+	}
+}
+
+func (t *LongConnMap) Do(connName string, command string, args ...interface{}) (interface{}, error) {
+	conn := t.GetLongConn(connName)
+	return conn.Do(command, args...)
+}
+
+func (t *LongConnMap) Send(connName string, command string, args ...interface{}) error {
+	conn := t.GetLongConn(connName)
+	return conn.Send(command, args...)
+}
+
 type RediGODB struct {
 	pool *redis.Pool
-	LongConn
+	*LongConnMap
 }
 
 func NewRediGODB() *RediGODB {
@@ -61,9 +123,7 @@ func NewRediGODB() *RediGODB {
 
 	o := new(RediGODB)
 	o.pool = &pool
-
-	conn := o.GetConn()
-	o.LongConn.long = &conn
+	o.LongConnMap = NewLongConnMap(o.pool)
 
 	return o
 }
@@ -94,17 +154,11 @@ func (t *RediGODB) Send(command string, args ...interface{}) error {
 }
 
 // 执行同步命令 - Do
-func (t *RediGODB) LongConnDo(command string, args ...interface{}) (interface{}, error) {
-	conn := *t.LongConn.long
-	t.LongConn.ConMutex.Lock()
-	defer t.LongConn.ConMutex.Unlock()
-	return conn.Do(command, args...)
+func (t *RediGODB) LongConnDo(connName string, command string, args ...interface{}) (interface{}, error) {
+	return t.LongConnMap.Do(connName, command, args...)
 }
 
 // 执行异步命令 - Send
-func (t *RediGODB) LongConnSend(command string, args ...interface{}) error {
-	conn := *t.LongConn.long
-	t.LongConn.ConMutex.Lock()
-	defer t.LongConn.ConMutex.Unlock()
-	return conn.Send(command, args...)
+func (t *RediGODB) LongConnSend(connName string, command string, args ...interface{}) error {
+	return t.LongConnMap.Send(connName, command, args...)
 }

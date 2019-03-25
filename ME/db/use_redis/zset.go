@@ -13,6 +13,36 @@ func (t *RedisDb) ZSetAddInt64(key string, score float64, mem int64) {
 	}
 }
 
+/// ZRANK key member
+func (t *RedisDb) ZSetAddInt64ForIndex(key string, score float64, mem int64) int64 {
+
+	var err error
+
+	conn := t.GetConn()
+	defer t.RecycleConn(conn)
+
+	err = (*conn).Send("MULTI")
+	if err != nil {
+		panic(err)
+	}
+	err = (*conn).Send("ZADD", key, score, mem)
+	if err != nil {
+		panic(err)
+	}
+	err = (*conn).Send("ZRANK", key, mem)
+	if err != nil {
+		panic(err)
+	}
+
+	var index []int64
+	index, err = redis.Int64s((*conn).Do("EXEC"))
+	if err != nil {
+		panic(err)
+	}
+
+	return index[1]
+}
+
 /// ZREM key member [member ...]
 func (t *RedisDb) ZSetRemoveInt64(key string, mem int64) {
 	_, err := t.Do("ZREM", key, mem)
@@ -24,6 +54,15 @@ func (t *RedisDb) ZSetRemoveInt64(key string, mem int64) {
 /// ZRANGE key start stop [WITHSCORES]
 func (t *RedisDb) ZSetGetRangeInt64s(key string, start int64, stop int64) (v []int64) {
 	v, err := redis.Int64s(t.Do("ZRANGE", key, start, stop))
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
+
+/// ZRANGE key start stop [WITHSCORES]
+func (t *RedisDb) ZSetGetRangeInt64sByNamedConn(name string, key string, start int64, stop int64) (v []int64) {
+	v, err := redis.Int64s(t.GetNamedLongConn(name).Do("ZRANGE", key, start, stop))
 	if err != nil {
 		panic(err)
 	}

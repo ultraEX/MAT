@@ -5,12 +5,21 @@ import (
 	"strconv"
 )
 
+const (
+	BID_ORDER_CONTAINER_KEY string = "bid_orders_container"
+	ASK_ORDER_CONTAINER_KEY string = "ask_orders_container"
+)
+
 func orderSetKey(symbol string) string {
 	return "os_" + symbol
 }
 
 func orderHashKey(user string, id int64) string {
 	return "oh_" + user + strconv.FormatInt(id, 10)
+}
+
+func cacheOrderHashKey(id int64) string {
+	return "coh_" + strconv.FormatInt(id, 10)
 }
 
 func orderHashKeyByID(id int64) string {
