@@ -30,22 +30,28 @@ func NewMatchEngine(symbol string, conf config.MarketConfig) *MatchEngine {
 	if o.Config.Market_Human {
 		if config.GetMEConfig().CoreType == "TradePool" {
 			o.TradePool[config.MarketType_Human] = core.NewTradePool(o.Symbol, config.MarketType_Human, &o.Config, o.tickerEngine)
-		} else {
+		} else if config.GetMEConfig().CoreType == "MEXCore" {
 			o.TradePool[config.MarketType_Human] = core.NewMEXCore(o.Symbol, config.MarketType_Human, &o.Config, o.tickerEngine)
+		} else {
+			o.TradePool[config.MarketType_Human] = core.NewMEEXCore(o.Symbol, config.MarketType_Human, &o.Config, o.tickerEngine)
 		}
 	}
 	if o.Config.Market_Robot {
 		if config.GetMEConfig().CoreType == "TradePool" {
 			o.TradePool[config.MarketType_Robot] = core.NewTradePool(o.Symbol, config.MarketType_Robot, &o.Config, o.tickerEngine)
-		} else {
+		} else if config.GetMEConfig().CoreType == "MEXCore" {
 			o.TradePool[config.MarketType_Robot] = core.NewMEXCore(o.Symbol, config.MarketType_Robot, &o.Config, o.tickerEngine)
+		} else {
+			o.TradePool[config.MarketType_Robot] = core.NewMEEXCore(o.Symbol, config.MarketType_Robot, &o.Config, o.tickerEngine)
 		}
 	}
 	if o.Config.Market_MixHR {
 		if config.GetMEConfig().CoreType == "TradePool" {
 			o.TradePool[config.MarketType_MixHR] = core.NewTradePool(o.Symbol, config.MarketType_MixHR, &o.Config, o.tickerEngine)
-		} else {
+		} else if config.GetMEConfig().CoreType == "MEXCore" {
 			o.TradePool[config.MarketType_MixHR] = core.NewMEXCore(o.Symbol, config.MarketType_MixHR, &o.Config, o.tickerEngine)
+		} else {
+			o.TradePool[config.MarketType_MixHR] = core.NewMEEXCore(o.Symbol, config.MarketType_MixHR, &o.Config, o.tickerEngine)
 		}
 	}
 	o.tickerEngine.SetTradePool(o.TradePool)

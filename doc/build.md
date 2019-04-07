@@ -162,9 +162,12 @@ ME Core Daemon Manager Tool:
 # Match Core Config:
 	"CoreType": "TradePool"
 	"CoreType": "MEXCore"
+	"CoreType": "MEEXCore"
 
 # Match Core Algorithm Config:
 	"Algorithm": "heapmap"
+	"Algorithm": "skipmap2"
+	"Algorithm": "skipmap1"
 	"Algorithm": "zset"
 	"Algorithm": "zsetcluster"
 

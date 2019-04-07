@@ -93,9 +93,9 @@ func (t *MultiChans_OutGo) ChanCap() int {
 }
 
 func (t *MultiChans_OutGo) GetANewChan() int64 {
-	idleno := t.idleChanNO
+	idleno := atomic.LoadInt64(&t.idleChanNO)
 	for i := int64(0); i < OUTGO_MULTI_CHANS_SIZE; i++ {
-		no := t.idleChanNO + i
+		no := idleno + i
 		if no >= OUTGO_MULTI_CHANS_SIZE {
 			no = 0
 		}
@@ -106,9 +106,14 @@ func (t *MultiChans_OutGo) GetANewChan() int64 {
 	}
 
 	/// update idleChanNO
-	atomic.AddInt64(&t.idleChanNO, 1)
-	if t.idleChanNO >= OUTGO_MULTI_CHANS_SIZE {
-		t.idleChanNO = 0
+	chNO := atomic.AddInt64(&t.idleChanNO, 1)
+	if chNO >= OUTGO_MULTI_CHANS_SIZE {
+		atomic.StoreInt64(&t.idleChanNO, 0)
 	}
-	return idleno
+
+	if idleno >= OUTGO_MULTI_CHANS_SIZE {
+		return 0
+	} else {
+		return idleno
+	}
 }

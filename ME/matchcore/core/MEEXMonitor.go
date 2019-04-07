@@ -7,12 +7,12 @@ import (
 	"../../config"
 )
 
-func (t *MEXCore) DumpTradePool(detail bool) string {
+func (t *MEEXCore) DumpTradePool(detail bool) string {
 	return "heap map algorithm monitor itf"
 }
 
-func (t *MEXCore) DumpTradePoolPrint(detail bool) {
-	fmt.Printf("==================[%s-%s Dump MEXCore Trade container]=====================\n", t.Symbol, t.MarketType.String())
+func (t *MEEXCore) DumpTradePoolPrint(detail bool) {
+	fmt.Printf("==================[%s-%s Dump MEEXCore Trade container]=====================\n", t.Symbol, t.MarketType.String())
 	formate := "2006-01-02T15:04:05Z07:00"
 	loc, _ := time.LoadLocation("Local")
 	fmt.Printf("Date Time: %s\n", time.Now().In(loc).Format(formate))
@@ -22,8 +22,8 @@ func (t *MEXCore) DumpTradePoolPrint(detail bool) {
 	fmt.Printf("=============================================================\n")
 }
 
-func (t *MEXCore) PumpTradePoolPrint() {
-	fmt.Printf("==================[%s-%s Pump MEXCore Trade container]=====================\n", t.Symbol, t.MarketType.String())
+func (t *MEEXCore) PumpTradePoolPrint() {
+	fmt.Printf("==================[%s-%s Pump MEEXCore Trade container]=====================\n", t.Symbol, t.MarketType.String())
 	formate := "2006-01-02T15:04:05Z07:00"
 	loc, _ := time.LoadLocation("Local")
 	fmt.Printf("Date Time: %s\n", time.Now().In(loc).Format(formate))
@@ -33,15 +33,15 @@ func (t *MEXCore) PumpTradePoolPrint() {
 	fmt.Printf("=============================================================\n")
 }
 
-func (t *MEXCore) DumpBeatHeart() string {
+func (t *MEEXCore) DumpBeatHeart() string {
 	return "to implement!"
 }
 
-func (t *MEXCore) DumpChannel() string {
+func (t *MEEXCore) DumpChannel() string {
 	return "to implement!"
 }
 
-func (t *MEXCore) DumpChanlsMap() {
+func (t *MEEXCore) DumpChanlsMap() {
 	fmt.Printf("==================[%s-%s Channel Map Infoo]=====================\n", t.Symbol, t.MarketType.String())
 	formate := "2006-01-02T15:04:05Z07:00"
 	loc, _ := time.LoadLocation("Local")
@@ -50,23 +50,23 @@ func (t *MEXCore) DumpChanlsMap() {
 	fmt.Printf("=======================================================\n")
 }
 
-func (t *MEXCore) IsFaulty() bool {
+func (t *MEEXCore) IsFaulty() bool {
 	/// to do
 
 	return false
 }
 
 ///------------------------------------------------------------------
-func (t *MEXCore) RestartDebuginfo() {
+func (t *MEEXCore) RestartDebuginfo() {
 	t.DebugInfo_RestartDebuginfo()
 }
 
-func (t *MEXCore) ResetMatchCorePerform() {
+func (t *MEEXCore) ResetMatchCorePerform() {
 	t.DebugInfo_ResetMatchCorePerform()
 }
 
-func (t *MEXCore) Statics() string {
-	fmt.Printf("===============[Market %s-%s Trade Info]==============\n", t.Symbol, t.MarketType.String())
+func (t *MEEXCore) Statics() string {
+	fmt.Printf("============[Market %s-%s MEEXCore Trade Info]===========\n", t.Symbol, t.MarketType.String())
 	fmt.Printf("===================(User Input Order)====================\n")
 	fmt.Printf("ASK ORDERS		: %d\n", t.DebugInfo_GetUserAskEnOrders())
 	fmt.Printf("BID ORDERS		: %d\n", t.DebugInfo_GetUserBidEnOrders())
@@ -107,30 +107,30 @@ func (t *MEXCore) Statics() string {
 	return "heap map algorithm monitor itf"
 }
 
-func (t *MEXCore) PrintHealth() {
+func (t *MEEXCore) PrintHealth() {
 	// to do
 }
 
-func (t *MEXCore) Test(u string, p ...interface{}) {
+func (t *MEEXCore) Test(u string, p ...interface{}) {
 	// to do
 }
 
-func (t *MEXCore) TradeCommand(u string, p ...interface{}) {
+func (t *MEEXCore) TradeCommand(u string, p ...interface{}) {
 	// to do
 }
 
-func (t *MEXCore) GetTradeCompleteRate() float64 {
+func (t *MEEXCore) GetTradeCompleteRate() float64 {
 	return t.DebugInfo_GetTradeCompleteRate()
 }
 
-func (t *MEXCore) GetAskPoolLen() int {
+func (t *MEEXCore) GetAskPoolLen() int {
 	return int(t.OrderContainerItf.AskSize())
 }
 
-func (t *MEXCore) GetBidPoolLen() int {
+func (t *MEEXCore) GetBidPoolLen() int {
 	return int(t.OrderContainerItf.BidSize())
 }
 
-func (t *MEXCore) GetPoolLen() int {
+func (t *MEEXCore) GetPoolLen() int {
 	return int(t.OrderContainerItf.TheSize())
 }

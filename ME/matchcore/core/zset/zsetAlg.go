@@ -146,6 +146,11 @@ func (t *OrderContainer) Dump() {
 	fmt.Printf("===================================================================\n")
 }
 
+func (t *OrderContainer) Pump() {
+	fmt.Printf("======================Pump zset.OrderContainer==========================\n")
+	fmt.Printf("===================================================================\n")
+}
+
 func (t *OrderContainer) BidSize() int64 {
 	return redis.RedisDbInstance().ZSetGetSize(redis.BID_ORDER_CONTAINER_KEY)
 }

@@ -10,7 +10,7 @@ import (
 const (
 	MODULE_NAME_MULTICHANS_IN string = "[MultiChans_In]: "
 	IN_MULTI_CHANS_SIZE       int    = 10
-	IN_CHANNEL_SIZE           int    = 68
+	IN_CHANNEL_SIZE           int    = 6
 )
 
 var (

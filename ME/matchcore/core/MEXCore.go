@@ -13,7 +13,7 @@ import (
 	te "../../tickers"
 	chs "../chansIO"
 	rt "../runtime"
-	hm "./heapmap"
+	sm "./structmap"
 	zs "./zset"
 	zc "./zsetcluster"
 )
@@ -52,7 +52,11 @@ func NewMEXCore(sym string, mt config.MarketType, conf *config.MarketConfig, te 
 	o := new(MEXCore)
 
 	if config.GetMEConfig().Algorithm == "heapmap" {
-		o.OrderContainerItf = hm.NewTradeContainer()
+		o.OrderContainerItf = sm.NewOrderContainerBaseHp()
+	} else if config.GetMEConfig().Algorithm == "skipmap1" {
+		o.OrderContainerItf = sm.NewOrderCoitainerBase1Sk()
+	} else if config.GetMEConfig().Algorithm == "skipmap2" {
+		o.OrderContainerItf = sm.NewOrderCoitainerBase2Sk()
 	} else if config.GetMEConfig().Algorithm == "zset" {
 		o.OrderContainerItf = zs.NewOrderContainer()
 	} else if config.GetMEConfig().Algorithm == "zsetcluster" {

@@ -10,7 +10,7 @@ import (
 
 const (
 	MODULE_NAME_MULTICHANS_OUT string = "[MultiChans]: "
-	OUT_MULTI_CHANS_SIZE       int    = 10
+	OUT_MULTI_CHANS_SIZE              = 10
 )
 
 var (
@@ -22,7 +22,7 @@ type MultiChans_Out struct {
 	chans      [OUT_MULTI_CHANS_SIZE]*ChanUnit_Out
 	proc       ChanProcess_Out
 	chanUse    *ChannelUse
-	idleChanNO int
+	idleChanNO int64
 }
 
 func NewMultiChans_Out(p ChanProcess_Out) *MultiChans_Out {
@@ -131,10 +131,31 @@ func (t *MultiChans_Out) ChanCap() int {
 	return OUT_CHANNEL_SIZE
 }
 
+// func (t *MultiChans_Out) getANewChan() int {
+// 	idleno := t.idleChanNO
+// 	for i := 0; i < OUT_MULTI_CHANS_SIZE; i++ {
+// 		no := t.idleChanNO + i
+// 		if no >= OUT_MULTI_CHANS_SIZE {
+// 			no = 0
+// 		}
+// 		if !t.chans[no].IsBusy() {
+// 			idleno = no
+// 			break
+// 		}
+// 	}
+
+// 	/// update idleChanNO
+// 	t.idleChanNO++
+// 	if t.idleChanNO >= OUT_MULTI_CHANS_SIZE {
+// 		t.idleChanNO = 0
+// 	}
+// 	return idleno
+// }
+
 func (t *MultiChans_Out) getANewChan() int {
-	idleno := t.idleChanNO
-	for i := 0; i < OUT_MULTI_CHANS_SIZE; i++ {
-		no := t.idleChanNO + i
+	idleno := atomic.LoadInt64(&t.idleChanNO)
+	for i := int64(0); i < OUT_MULTI_CHANS_SIZE; i++ {
+		no := idleno + i
 		if no >= OUT_MULTI_CHANS_SIZE {
 			no = 0
 		}
@@ -145,11 +166,16 @@ func (t *MultiChans_Out) getANewChan() int {
 	}
 
 	/// update idleChanNO
-	t.idleChanNO++
-	if t.idleChanNO >= OUT_MULTI_CHANS_SIZE {
-		t.idleChanNO = 0
+	chNO := atomic.AddInt64(&t.idleChanNO, 1)
+	if chNO >= OUTGO_MULTI_CHANS_SIZE {
+		atomic.StoreInt64(&t.idleChanNO, 0)
 	}
-	return idleno
+
+	if idleno >= OUTGO_MULTI_CHANS_SIZE {
+		return 0
+	} else {
+		return int(idleno)
+	}
 }
 
 func (t *MultiChans_Out) GetIdleChannel_Trade(askID int64, bidID int64) comm.Set {

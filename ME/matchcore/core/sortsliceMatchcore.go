@@ -454,6 +454,10 @@ func (t *TradePool) DumpTradePoolPrint(detail bool) {
 	fmt.Printf("=======================================================\n")
 }
 
+func (t *TradePool) PumpTradePoolPrint() {
+
+}
+
 func (t *TradePool) DumpTradePool(detail bool) string {
 	strBuff := fmt.Sprintf("==================[%s-%s Trade Pool Info]=====================\n", t.Symbol, t.MarketType.String())
 	formate := "2006-01-02T15:04:05Z07:00"
@@ -2257,7 +2261,13 @@ func (t *TradePool) rmAskOrderByID(id int64) bool {
 }
 
 func orderValidatable(o *comm.Order) bool {
+	if o == nil {
+		return false
+	}
 	if o.Price <= 0 || o.Volume <= 0 {
+		return false
+	}
+	if o.Status == comm.ORDER_CANCELED {
 		return false
 	}
 

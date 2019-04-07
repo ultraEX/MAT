@@ -159,3 +159,34 @@ Core TPS = 2500TPS
     Trade Complete Rate	: 1404.000000
     Trade UserInput Rate	: 1664.717391
     min=0.000285335, max=0.015078506, ave=0.000727047
+
+
+# MEEXCore 1level lazy skiplist algorithm: input 10 channel,out put 10 channel, bypass mysql:
+    ============[Market BTC/ETH-MixHR Market MEEXCore Trade Info]===========
+    ----------------------------------------------------------
+    Ask Pool Scale	:	213665
+    Bid Pool Scale	:	213774
+    Newest Price	:	2.000000
+    ----------------------------------------------------------
+    =====================[Trade Statics]=====================
+    Trade Complete Rate	: 2334.581028
+    Trade Output Rate	: 2334.581028
+    Trade UserInput Rate	: 2853.841897
+    ----------------------------------------------------------
+    Match core performance(second/round):
+    min=0.000005527, max=0.384575573, ave=0.000268804
+
+# MEEXCore 1level lazy skiplist algorithm: input 10 channel,out put 10 channel, bypass mysql:
+    ============[Market BTC/ETH-MixHR Market MEEXCore Trade Info]===========
+    ----------------------------------------------------------
+    Ask Pool Scale	:	241727
+    Bid Pool Scale	:	241885
+    Newest Price	:	1.600000
+    ----------------------------------------------------------
+    =====================[Trade Statics]=====================
+    Trade Complete Rate	: 2532.507692
+    Trade Output Rate	: 2532.507692
+    Trade UserInput Rate	: 3089.892308
+    ----------------------------------------------------------
+    Match core performance(second/round):
+    min=0.000002139, max=0.428364849, ave=0.000038247

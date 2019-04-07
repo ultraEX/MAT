@@ -20,8 +20,8 @@
 	"Redis_MX_Db": 0,
 
 	"InPoolMode": "unblock",
-	"CoreType": "MEXCore",
-	"Algorithm": "zset",
+	"CoreType": "MEEXCore",
+	"Algorithm": "skipmap1",
 	"CoinList": [
 		{
 			"Mark": "Invalid",

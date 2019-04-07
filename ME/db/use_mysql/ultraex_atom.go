@@ -251,17 +251,11 @@ retry:
 	/// ask + bid all filled -> couple record trade and remove from order table
 	/// ask or bid filled -> eighter to record trade and remove from order table
 	if bidTrade.Status == ORDER_FILLED && askTrade.Status == ORDER_FILLED {
-		/// To record TradeMatch info to Mysql database: Trade table
 		err = t.InsertTradeCouple(bidTrade, askTrade, tx)
 		if err != nil {
 			panic(err)
 		}
 
-		/// Rm order from Duration Storage: clear the orders in the order table
-		// err = t.RmOrderCouple(&bidTrade.Order, &askTrade.Order, tx)
-		// if err != nil {
-		// 	panic(err)
-		// }
 		err = t.UpdateOrder(&bidTrade.Order, tx)
 		if err != nil {
 			panic(err)
@@ -270,51 +264,20 @@ retry:
 		if err != nil {
 			panic(err)
 		}
-	} else if bidTrade.Status == ORDER_FILLED {
-		/// bid complete
+	} else {
 		err = t.InsertTrade(bidTrade, tx)
 		if err != nil {
 			panic(err)
 		}
-		// err = t.RmOrder(bidTrade.Who, bidTrade.ID, bidTrade.Symbol, tx)
-		// if err != nil {
-		// 	panic(err)
-		// }
 		err = t.UpdateOrder(&bidTrade.Order, tx)
 		if err != nil {
 			panic(err)
 		}
-
-		/// ask partial trade and continue to trade
 		err = t.UpdateOrder(&askTrade.Order, tx)
 		if err != nil {
 			panic(err)
 		}
 		err = t.InsertTrade(askTrade, tx)
-		if err != nil {
-			panic(err)
-		}
-	} else if askTrade.Status == ORDER_FILLED {
-		/// ask complete
-		err = t.InsertTrade(askTrade, tx)
-		if err != nil {
-			panic(err)
-		}
-		// err = t.RmOrder(askTrade.Who, askTrade.ID, askTrade.Symbol, tx)
-		// if err != nil {
-		// 	panic(err)
-		// }
-		err = t.UpdateOrder(&askTrade.Order, tx)
-		if err != nil {
-			panic(err)
-		}
-
-		/// bid partial trade and continue to trade
-		err = t.UpdateOrder(&bidTrade.Order, tx)
-		if err != nil {
-			panic(err)
-		}
-		err = t.InsertTrade(bidTrade, tx)
 		if err != nil {
 			panic(err)
 		}

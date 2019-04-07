@@ -16,7 +16,7 @@ function testThriftConcurrency()
 {
 	echo -e "Begin to test Thrift Concurrency..."
 
-    for ((i=0; i<6; i++))
+    for ((i=0; i<7; i++))
     do
         let alpha=160
         let startID=i*alpha

@@ -210,6 +210,22 @@ func Command(m *markets.Markets) {
 			}
 		}
 
+		/// pump command:========================================
+		if command == "pump" {
+			fmt.Printf("GetCommand: %s %s\n", command, param1)
+			matchEng, err := Marks.GetMatchEngine(Symbol)
+			if matchEng != nil {
+				tp := matchEng.GetTradePool(MktType)
+				if tp != nil {
+					tp.PumpTradePoolPrint()
+				} else {
+					MarketEngineNilWarningPrint()
+				}
+			} else {
+				fmt.Println(err)
+			}
+		}
+
 		/// dumpch command:========================================
 		if command == "dumpch" {
 			fmt.Printf("GetCommand: %s\n", command)

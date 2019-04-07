@@ -1,4 +1,4 @@
-package heapmap
+package structmap
 
 import (
 	"container/heap"
@@ -9,21 +9,21 @@ import (
 )
 
 ///------------------------------------------------------------------
-type TradeContainer struct {
+type OrderContainerBaseHp struct {
 	comm.IDOrderMap
 	TradePrices
 }
 
-func NewTradeContainer() *TradeContainer {
-	o := new(TradeContainer)
+func NewOrderContainerBaseHp() *OrderContainerBaseHp {
+	o := new(OrderContainerBaseHp)
 	o.IDOrderMap = *comm.NewIDOrderMap()
 	o.TradePrices = *NewTradePrices()
 	return o
 }
 
-func (t *TradeContainer) Push(order *comm.Order) {
+func (t *OrderContainerBaseHp) Push(order *comm.Order) {
 	if _, ok := t.IDOrderMap.Get(order.ID); ok {
-		panic(fmt.Errorf("TradeContainer Push ID(%d) replication, reentry order!", order.ID))
+		panic(fmt.Errorf("OrderContainerBaseHp Push ID(%d) replication, reentry order!", order.ID))
 	}
 	t.IDOrderMap.Set(order.ID, order)
 
@@ -34,7 +34,7 @@ func (t *TradeContainer) Push(order *comm.Order) {
 	}
 }
 
-func (t *TradeContainer) Pop(aorb comm.TradeType) (order *comm.Order) {
+func (t *OrderContainerBaseHp) Pop(aorb comm.TradeType) (order *comm.Order) {
 	if aorb == comm.TradeType_BID {
 		order = t.TradePrices.BidPrices.Pop()
 	} else {
@@ -47,7 +47,7 @@ func (t *TradeContainer) Pop(aorb comm.TradeType) (order *comm.Order) {
 	return order
 }
 
-func (t *TradeContainer) GetTop(aorb comm.TradeType) (order *comm.Order) {
+func (t *OrderContainerBaseHp) GetTop(aorb comm.TradeType) (order *comm.Order) {
 	if aorb == comm.TradeType_BID {
 		order = t.TradePrices.BidPrices.GetTop()
 	} else {
@@ -57,7 +57,7 @@ func (t *TradeContainer) GetTop(aorb comm.TradeType) (order *comm.Order) {
 	return order
 }
 
-func (t *TradeContainer) Get(id int64) *comm.Order {
+func (t *OrderContainerBaseHp) Get(id int64) *comm.Order {
 	if order, ok := t.IDOrderMap.Get(id); ok {
 		return order
 	} else {
@@ -65,22 +65,27 @@ func (t *TradeContainer) Get(id int64) *comm.Order {
 	}
 }
 
-func (t *TradeContainer) Dump() {
-	fmt.Printf("======================Dump TradeContainer==========================\n")
+func (t *OrderContainerBaseHp) Dump() {
+	fmt.Printf("======================Dump OrderContainerBaseHp==========================\n")
 	t.IDOrderMap.Dump()
 	t.TradePrices.Dump()
 	fmt.Printf("===================================================================\n")
 }
 
-func (t *TradeContainer) BidSize() int64 {
+func (t *OrderContainerBaseHp) Pump() {
+	fmt.Printf("======================Pump OrderContainerBaseHp==========================\n")
+	fmt.Printf("===================================================================\n")
+}
+
+func (t *OrderContainerBaseHp) BidSize() int64 {
 	return t.TradePrices.BidPrices.Size()
 }
 
-func (t *TradeContainer) AskSize() int64 {
+func (t *OrderContainerBaseHp) AskSize() int64 {
 	return t.TradePrices.AskPrices.Size()
 }
 
-func (t *TradeContainer) TheSize() int64 {
+func (t *OrderContainerBaseHp) TheSize() int64 {
 	return t.IDOrderMap.Len()
 }
 
